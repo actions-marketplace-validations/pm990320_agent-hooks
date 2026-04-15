@@ -12,7 +12,8 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
       "draft": true,
-      "prerelease": false
+      "prerelease": false,
+      "release-as": "0.1.0"
     }
   },
   "plugins": [

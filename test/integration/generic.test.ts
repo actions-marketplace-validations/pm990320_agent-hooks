@@ -192,13 +192,15 @@ pipelines:
     expect(result.stdout).toContain("scripts/untracked.sh");
   });
 
-  test("timeout-ms terminates a hung step and reports timedOut", async () => {
-    // Replace the fixture config with a single step that sleeps for
-    // 30s and a 250ms timeout. The runner should SIGTERM/KILL it,
-    // return exit 124, and surface the time-out reason in stdout.
-    const fs = await import("node:fs/promises");
-    const path = await import("node:path");
-    const cfg = `
+  test(
+    "timeout-ms terminates a hung step and reports timedOut",
+    async () => {
+      // Replace the fixture config with a single step that sleeps for
+      // 30s and a 250ms timeout. The runner should SIGTERM/KILL it,
+      // return exit 124, and surface the time-out reason in stdout.
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const cfg = `
 name: timeout-test
 steps:
   hang:
@@ -209,22 +211,27 @@ pipelines:
   ci:
     steps: [hang]
 `;
-    await fs.writeFile(
-      path.join(fixture.cwd, ".config", "agent-hooks.yml"),
-      cfg,
-      "utf8",
-    );
-    const begin = Date.now();
-    const result = await runCli(["run", "ci", "--all"], { cwd: fixture.cwd });
-    const elapsed = Date.now() - begin;
-    expect(result.exitCode).not.toBe(0);
-    // 250ms timeout + ~1s SIGKILL escalation + Bun startup overhead.
-    // 10s upper bound is generous; the step would otherwise run 30s.
-    expect(elapsed).toBeLessThan(10_000);
-    // Conventional GNU `timeout` exit code.
-    expect(result.stdout).toContain("hang");
-    expect(result.stdout).toContain("failed (exit 124)");
-  });
+      await fs.writeFile(
+        path.join(fixture.cwd, ".config", "agent-hooks.yml"),
+        cfg,
+        "utf8",
+      );
+      const begin = Date.now();
+      const result = await runCli(["run", "ci", "--all"], { cwd: fixture.cwd });
+      const elapsed = Date.now() - begin;
+      expect(result.exitCode).not.toBe(0);
+      // 250ms timeout + ~1s SIGKILL escalation + Bun startup overhead.
+      // 10s upper bound is generous; the step would otherwise run 30s.
+      expect(elapsed).toBeLessThan(10_000);
+      // Conventional GNU `timeout` exit code.
+      expect(result.stdout).toContain("hang");
+      expect(result.stdout).toContain("failed (exit 124)");
+    },
+    // Bun test's per-test default is 5s. The SIGTERM→SIGKILL escalation
+    // plus process spawn overhead on slower CI runners can push real
+    // elapsed time past that, so give this test its own 15s window.
+    15_000,
+  );
 
   test("invocation from a subdir re-anchors at the git root, not the subdir", async () => {
     // Without the gitRoot re-anchor, `git ls-files` from a subdir

@@ -1,6 +1,13 @@
 import { Readable } from "node:stream";
 import { run } from "../../../src/cli.ts";
 
+// Captured once, at module load, before any test has chdir'd. Used as
+// the restore target for runCli's CWD so that a previously-aborted test
+// (e.g. one that hit bun test's per-test timeout mid-runCli) can't
+// poison subsequent tests with a dangling process.cwd() pointing into a
+// cleaned-up fixture directory.
+const SAFE_CWD = process.cwd();
+
 export interface CliResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -27,7 +34,11 @@ export async function runCli(
   argv: readonly string[],
   options: RunCliOptions,
 ): Promise<CliResult> {
-  const originalCwd = process.cwd();
+  // Restore to the module-load CWD, not process.cwd() at call time.
+  // A previously-aborted test may have left process.cwd() pointing at
+  // a fixture directory that's since been `fs.rm`'d — chdir'ing back to
+  // that would throw ENOENT and cascade the failure into this test.
+  const originalCwd = SAFE_CWD;
   const originalStdoutWrite = process.stdout.write.bind(process.stdout);
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
   const originalEnv: Record<string, string | undefined> = {};
@@ -93,7 +104,15 @@ export async function runCli(
     } else {
       process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"] = previousForceMode;
     }
-    process.chdir(originalCwd);
+    // Belt-and-suspenders: if SAFE_CWD itself somehow got deleted
+    // (shouldn't happen — it's the project root at `bun test` start),
+    // don't let the chdir failure mask the actual test failure.
+    try {
+      process.chdir(originalCwd);
+    } catch {
+      // Nothing useful we can do; leave CWD as-is so the test still
+      // reports its real assertion error.
+    }
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
     for (const [k, v] of Object.entries(originalEnv)) {
