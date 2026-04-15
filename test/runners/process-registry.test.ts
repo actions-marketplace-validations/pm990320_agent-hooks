@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   installSignalHandlers,
   killAllChildren,
@@ -7,6 +7,15 @@ import {
   resetRegistryForTesting,
   type ChildHandle,
 } from "../../src/runners/process-registry.ts";
+
+// The registry is a module-level singleton. Integration tests that
+// ran before this file may have spawned child processes whose dispose
+// callbacks didn't fire (aborted runs, killed sleeps, etc.), leaking
+// entries into the global Set. Reset before AND after every test so
+// this file's first assertion can't see pollution from earlier files.
+beforeEach(() => {
+  resetRegistryForTesting();
+});
 
 afterEach(() => {
   resetRegistryForTesting();
