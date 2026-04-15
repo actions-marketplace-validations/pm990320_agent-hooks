@@ -23,6 +23,8 @@ whether to try it; this is for people using it.
   integration for rich E2E artifacts
 - [GitHub Actions](./github-actions.md) — the shipped composite
   action and the workflow scaffold `init` generates
+- [Release process](./release-process.md) — how releases are built,
+  promoted, and listed on the GitHub Marketplace
 - [Beads](./beads.md) — auto follow-up commits and sync handling
 - [Troubleshooting](./troubleshooting.md) — preflight checks,
   environment resolution (venv, direnv, mise), and `doctor`

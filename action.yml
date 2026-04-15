@@ -2,6 +2,12 @@ name: agent-hooks
 description: Install agent-hooks and make it available on PATH for subsequent steps
 author: Patrick Menlove
 
+branding:
+  # Feather icon (https://feathericons.com) — 'terminal' signals "this
+  # installs a CLI tool". Color 'blue' is GitHub's most neutral accent.
+  icon: terminal
+  color: blue
+
 inputs:
   version:
     description: Version to install (tag like v0.1.0, or "latest")

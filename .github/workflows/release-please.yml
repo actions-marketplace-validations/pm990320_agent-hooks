@@ -176,3 +176,32 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: gh release edit "$TAG" --draft=false --latest
+
+      - name: Advance rolling major tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Composite-action consumers pin to a rolling major tag
+          # (pm990320/agent-hooks@v0, @v1, etc.) so they get patches
+          # without touching their workflow. Move that tag forward on
+          # every release — e.g. v0.1.5 also updates v0.
+          MAJOR_TAG="${TAG%%.*}"   # v0.1.5 → v0
+          if [ "$MAJOR_TAG" = "$TAG" ]; then
+            echo "::warning::tag '$TAG' does not look like vMAJOR.MINOR.PATCH — skipping rolling-tag update"
+            exit 0
+          fi
+
+          SHA=$(gh api "repos/$REPO/git/refs/tags/$TAG" --jq .object.sha)
+          echo "Rolling $MAJOR_TAG → $SHA (from $TAG)"
+
+          if gh api "repos/$REPO/git/refs/tags/$MAJOR_TAG" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$REPO/git/refs/tags/$MAJOR_TAG" \
+              -f sha="$SHA" -F force=true
+          else
+            gh api -X POST "repos/$REPO/git/refs" \
+              -f ref="refs/tags/$MAJOR_TAG" -f sha="$SHA"
+          fi
