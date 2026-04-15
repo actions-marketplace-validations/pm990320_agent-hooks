@@ -39,21 +39,39 @@ jobs:
       needs.release-please.outputs.pr != '' &&
       needs.release-please.outputs.pr != 'null' &&
       needs.release-please.outputs.release_created != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: true
       matrix:
+        # IMPORTANT: darwin targets MUST build on macos-* runners. Bun's
+        # --compile output is signed ad-hoc by the host linker only when
+        # the build host is macOS. Cross-compiling darwin from linux
+        # produces an unsigned Mach-O, and macOS Sonoma+ kills unsigned
+        # downloaded binaries on exec via com.apple.provenance (even
+        # without the classic com.apple.quarantine attribute). Matrix
+        # mirrors .github/workflows/ci.yml's binary-matrix for
+        # consistency.
         include:
           - target: bun-linux-x64
+            runner: ubuntu-latest
             artifact: agent-hooks-linux-x64
+            can-run: true
           - target: bun-linux-arm64
+            runner: ubuntu-latest
             artifact: agent-hooks-linux-arm64
+            can-run: false
           - target: bun-darwin-x64
+            runner: macos-latest
             artifact: agent-hooks-darwin-x64
+            can-run: false
           - target: bun-darwin-arm64
+            runner: macos-latest
             artifact: agent-hooks-darwin-arm64
+            can-run: true
           - target: bun-windows-x64
+            runner: windows-latest
             artifact: agent-hooks-windows-x64.exe
+            can-run: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,12 +82,21 @@ jobs:
           bun-version: latest
 
       - run: bun install --frozen-lockfile
+        shell: bash
 
       - name: Compile ${{ matrix.artifact }}
+        shell: bash
         run: |
           mkdir -p bin
           bun build ./src/index.ts --compile --target=${{ matrix.target }} \
             --outfile ./bin/${{ matrix.artifact }}
+
+      - name: Smoke-test native binary
+        if: matrix.can-run
+        shell: bash
+        run: |
+          ./bin/${{ matrix.artifact }} --version
+          ./bin/${{ matrix.artifact }} --help >/dev/null
 
       - uses: actions/upload-artifact@v4
         with:
