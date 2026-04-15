@@ -1,0 +1,71 @@
+name: agent-hooks
+description: Install agent-hooks and make it available on PATH for subsequent steps
+author: Patrick Menlove
+
+inputs:
+  version:
+    description: Version to install (tag like v0.1.0, or "latest")
+    required: false
+    default: latest
+  run:
+    description: If set, run this pipeline immediately after install (e.g. "ci")
+    required: false
+    default: ""
+
+outputs:
+  version:
+    description: Resolved version that was installed
+    value: ${{ steps.install.outputs.version }}
+  binary-path:
+    description: Absolute path to the installed binary
+    value: ${{ steps.install.outputs.binary-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve + install agent-hooks binary
+      id: install
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ inputs.version }}"
+        REPO="pm990320/agent-hooks"
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64) ARCH=x64 ;;
+          aarch64|arm64) ARCH=arm64 ;;
+        esac
+        case "$OS" in
+          linux) TARGET="linux-$ARCH" ;;
+          darwin) TARGET="darwin-$ARCH" ;;
+          msys*|mingw*|cygwin*) TARGET="windows-x64.exe" ;;
+          *) echo "Unsupported OS: $OS" >&2; exit 1 ;;
+        esac
+
+        if [ "$VERSION" = "latest" ]; then
+          DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/agent-hooks-$TARGET"
+          RESOLVED=$(curl -sI "https://github.com/$REPO/releases/latest" \
+            | awk -F'/' '/^location:/ {print $NF}' | tr -d '\r\n' || echo "latest")
+        else
+          DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/agent-hooks-$TARGET"
+          RESOLVED="$VERSION"
+        fi
+
+        INSTALL_DIR="$HOME/.agent-hooks/bin"
+        mkdir -p "$INSTALL_DIR"
+        BIN_PATH="$INSTALL_DIR/agent-hooks"
+
+        echo "Downloading $DOWNLOAD_URL"
+        curl -fL "$DOWNLOAD_URL" -o "$BIN_PATH"
+        chmod +x "$BIN_PATH"
+
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        echo "version=$RESOLVED" >> "$GITHUB_OUTPUT"
+        echo "binary-path=$BIN_PATH" >> "$GITHUB_OUTPUT"
+        "$BIN_PATH" --version
+
+    - name: Optionally run a pipeline
+      if: ${{ inputs.run != '' }}
+      shell: bash
+      run: agent-hooks run ${{ inputs.run }} --all

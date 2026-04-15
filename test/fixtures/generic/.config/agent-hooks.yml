@@ -1,0 +1,16 @@
+name: generic-fixture
+steps:
+  lint:
+    run: bash scripts/fake-lint.sh {files}
+    files: "src/**/*.txt"
+  typecheck:
+    run: bash scripts/fake-typecheck.sh
+    invocation: project
+  failing:
+    run: bash scripts/failing.sh
+    invocation: project
+pipelines:
+  ci:
+    steps: [lint, typecheck]
+  broken:
+    steps: [lint, failing]

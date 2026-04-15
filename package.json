@@ -1,0 +1,56 @@
+{
+  "name": "agent-hooks",
+  "version": "0.0.0",
+  "description": "One command for CI, pre-commit hooks, and agent feedback loops. Ships as a single binary.",
+  "keywords": [
+    "ci",
+    "pre-commit",
+    "git-hooks",
+    "agent",
+    "claude-code",
+    "hooks"
+  ],
+  "homepage": "https://github.com/pm990320/agent-hooks",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pm990320/agent-hooks.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pm990320/agent-hooks/issues"
+  },
+  "license": "MIT",
+  "author": "Patrick Menlove",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "generate:schema": "bun run scripts/generate-schema.ts",
+    "prebuild": "bun run generate:schema",
+    "build": "bun build ./src/index.ts --compile --outfile ./bin/agent-hooks",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --coverage",
+    "test:watch": "bun test --watch"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "json5": "2.2.3",
+    "picomatch": "4.0.4",
+    "yaml": "2.8.3",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/bun": "^1.1.14",
+    "@types/node": "25.6.0",
+    "@types/picomatch": "4.0.3",
+    "eslint": "^9.17.0",
+    "license-checker-rseidelsohn": "4.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.2"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "packageManager": "bun@1.2.15"
+}

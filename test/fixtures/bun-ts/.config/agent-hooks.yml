@@ -1,0 +1,23 @@
+name: bun-ts-fixture
+
+steps:
+  lint:
+    run: bash scripts/fake-eslint.sh {files}
+    files: "src/**/*.ts"
+  tsc:
+    run: bash scripts/fake-tsc.sh
+    invocation: project
+  test:
+    run: bash scripts/fake-vitest.sh {files}
+    files: "src/**/*.ts"
+
+pipelines:
+  ci:
+    steps: [lint, tsc, test]
+  pre-commit:
+    steps: [lint, tsc]
+
+git:
+  hooks:
+    pre-commit:
+      pipeline: pre-commit

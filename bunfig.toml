@@ -1,0 +1,9 @@
+[install]
+exact = true
+
+[test]
+coverage = true
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
+coverageThreshold = { line = 1.0, function = 1.0, statement = 1.0 }
+coverageSkipTestFiles = true

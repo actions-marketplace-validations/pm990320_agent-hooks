@@ -1,0 +1,2 @@
+# lockfile touch file so the python-uv detector fires in tests
+version = 1

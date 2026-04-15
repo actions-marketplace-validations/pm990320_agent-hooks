@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/pm990320/agent-hooks/main/schema.json
+
+# Detected stacks: node-bun
+# Detected bun — scaffolded lint/typecheck/test/build steps plus a post-merge reinstall hook.
+
+name: agent-hooks
+
+steps:
+  lint:
+    run: bun run lint
+    invocation: project
+    tags: [fast, lint]
+    description: Run the project's `lint` script via bun
+
+  typecheck:
+    run: bun run typecheck
+    invocation: project
+    tags: [fast]
+    description: TypeScript project check via bun
+
+  test:
+    run: bun test --coverage
+    invocation: project
+    tags: [fast]
+    description: Run tests via bun
+
+  build:
+    run: bun run build
+    invocation: project
+    tags: [slow, build]
+    description: Build the project via bun
+
+  install-deps:
+    run: bun install
+    invocation: project
+    description: Re-install dependencies via bun
+
+  shellcheck:
+    run: shellcheck {file}
+    files: "**/*.sh"
+    invocation: per-file
+    parallel: 8
+    tags: [fast, lint]
+    requires:
+      - command: shellcheck
+    on-missing: warn-skip
+
+  schema-fresh:
+    # Regenerate the JSON Schema in --check mode and diff against the
+    # committed schema.json. Catches the easy mistake of editing
+    # src/config/schema.ts without rerunning `bun run generate:schema`.
+    run: bun scripts/generate-schema.ts --check
+    invocation: project
+    tags: [fast]
+
+  license-audit:
+    # Fail the build if any production dependency ships under a license
+    # outside the allow-list. Runs only when the dependency graph
+    # actually changes (package.json / bun.lock).
+    run: >-
+      bunx license-checker-rseidelsohn
+      --production
+      --excludePrivatePackages
+      --onlyAllow 'MIT;ISC;Apache-2.0;BSD-2-Clause;BSD-3-Clause;0BSD;CC0-1.0;Unlicense'
+      --summary
+    invocation: project
+    tags: [fast, audit]
+    when-changed:
+      paths: [package.json, bun.lock]
+
+pipelines:
+  ci:
+    steps: [lint, typecheck, shellcheck, schema-fresh, license-audit, test, build]
+
+  pre-commit:
+    steps: [lint, typecheck, shellcheck, schema-fresh, license-audit, test]
+    parallel: true
+    exclude-tags: [slow]
+
+  agent-edit:
+    steps: [lint, typecheck, shellcheck, schema-fresh, license-audit, test]
+    parallel: true
+    exclude-tags: [slow]
+
+  reinstall:
+    steps: [install-deps]
+
+git:
+  hooks:
+    pre-commit:
+      pipeline: pre-commit
+    post-merge:
+      pipeline: reinstall
+    post-checkout:
+      pipeline: reinstall
+    post-rewrite:
+      pipeline: reinstall
+
+agents:
+  claude-code:
+    hooks:
+      PostToolUse:
+        - matcher: "Write|Edit|MultiEdit"
+          pipeline: agent-edit
+
+beads:
+  enabled: auto
+  pre-commit: stage
+  post-sync: commit

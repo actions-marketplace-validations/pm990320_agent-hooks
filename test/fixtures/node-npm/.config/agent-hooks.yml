@@ -1,0 +1,20 @@
+name: node-npm-fixture
+
+steps:
+  lint:
+    run: bash scripts/fake-eslint.sh {files}
+    files: "src/**/*.js"
+  test:
+    run: bash scripts/fake-jest.sh {files}
+    files: "src/**/*.js"
+
+pipelines:
+  ci:
+    steps: [lint, test]
+  pre-commit:
+    steps: [lint]
+
+git:
+  hooks:
+    pre-commit:
+      pipeline: pre-commit

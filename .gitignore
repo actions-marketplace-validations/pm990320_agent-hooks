@@ -1,5 +1,37 @@
+# Dependencies
+node_modules/
 
-# Beads / Dolt files (added by bd init)
+# Build output
+dist/
+build/
+bin/
+*.tsbuildinfo
+
+# Test + coverage
+coverage/
+.nyc_output/
+
+# Bun
+.bun/
+
+# Beads / Dolt (added by bd init)
 .dolt/
 *.db
 .beads-credential-key
+
+# OS + editors
+.DS_Store
+*.swp
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Env
+.env
+.env.local
+.env.*.local

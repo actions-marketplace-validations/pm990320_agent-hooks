@@ -1,0 +1,10 @@
+{
+  "name": "bun-ts-fixture",
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "bun@1.2.15",
+  "scripts": {
+    "lint": "bash scripts/fake-eslint.sh",
+    "test": "bash scripts/fake-vitest.sh"
+  }
+}

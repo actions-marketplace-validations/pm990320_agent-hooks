@@ -1,0 +1,103 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set up shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck --version
+
+      - name: Run agent-hooks CI (dogfood)
+        run: bun src/index.ts ci --all
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+
+  binary-matrix:
+    name: build ${{ matrix.target }}
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-linux-x64
+            runner: ubuntu-latest
+            artifact: agent-hooks-linux-x64
+            can-run: true
+          - target: bun-linux-arm64
+            runner: ubuntu-latest
+            artifact: agent-hooks-linux-arm64
+            can-run: false
+          - target: bun-darwin-x64
+            runner: macos-latest
+            artifact: agent-hooks-darwin-x64
+            can-run: false
+          - target: bun-darwin-arm64
+            runner: macos-latest
+            artifact: agent-hooks-darwin-arm64
+            can-run: true
+          - target: bun-windows-x64
+            runner: windows-latest
+            artifact: agent-hooks-windows-x64.exe
+            can-run: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Compile binary
+        shell: bash
+        run: |
+          mkdir -p bin
+          bun build ./src/index.ts --compile --target=${{ matrix.target }} --outfile ./bin/${{ matrix.artifact }}
+
+      - name: Smoke-test native binary
+        if: matrix.can-run
+        shell: bash
+        run: |
+          ./bin/${{ matrix.artifact }} --version
+          ./bin/${{ matrix.artifact }} --help
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: bin/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
