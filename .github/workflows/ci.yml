@@ -21,7 +21,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned: bun 1.3.x --compile stopped emitting linker-signed
+          # darwin-arm64 output, so downloaded releases get SIGKILL'd by
+          # macOS Sonoma+ provenance enforcement. 1.2.15 still signs.
+          bun-version: "1.2.15"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -76,7 +79,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Pinned: bun 1.3.x --compile stopped emitting linker-signed
+          # darwin-arm64 output, so downloaded releases get SIGKILL'd by
+          # macOS Sonoma+ provenance enforcement. 1.2.15 still signs.
+          bun-version: "1.2.15"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
