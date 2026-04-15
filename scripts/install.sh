@@ -133,6 +133,20 @@ echo "Downloading $URL"
 curl -fL "$URL" -o "$TARGET"
 chmod +x "$TARGET"
 
+# macOS defense-in-depth: Bun's --compile output is auto-ad-hoc-signed
+# only when the build host's linker does it, and some Bun versions
+# (1.3.x as of this writing) skip that on darwin-arm64. An unsigned
+# Mach-O with com.apple.provenance (which macOS Sonoma+ attaches to
+# every file) gets SIGKILL'd on exec. Re-sign the binary locally as
+# ad-hoc; this is idempotent — a linker-signed binary is re-signed to
+# a different but equally-valid ad-hoc signature, and an unsigned one
+# becomes valid. Requires `codesign`, which ships with Xcode Command
+# Line Tools and is present on every stock macOS install.
+if [ "$OS" = "darwin" ] && command -v codesign >/dev/null 2>&1; then
+  codesign --remove-signature "$TARGET" 2>/dev/null || true
+  codesign -fs - --force --deep "$TARGET" 2>/dev/null || true
+fi
+
 if ! "$TARGET" --version >/dev/null 2>&1; then
   echo "Installed binary failed to run. Removing." >&2
   rm -f "$TARGET"
