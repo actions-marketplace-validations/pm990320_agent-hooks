@@ -512,12 +512,29 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
         await proc.stdin.write(stdin);
         await proc.stdin.end();
       }
-      const [stdoutText, stderrText, { exitCode, timedOut }] =
-        await Promise.all([
-          new Response(proc.stdout).text(),
-          new Response(proc.stderr).text(),
-          runWithTimeout(proc),
+      // Start the stream drains eagerly so any output already buffered
+      // is captured, but don't let them block the return on a timeout:
+      // `sh -c 'foo'` forks a grandchild that inherits the pipe write
+      // ends, so killing sh doesn't close the read ends. On Linux that
+      // leaves the reads waiting indefinitely until the grandchild
+      // naturally exits. When runWithTimeout reports timedOut, give
+      // the reads a short grace window to flush what they already have
+      // and then give up on the rest.
+      const stdoutPromise = new Response(proc.stdout).text();
+      const stderrPromise = new Response(proc.stderr).text();
+      const { exitCode, timedOut } = await runWithTimeout(proc);
+      const graceMs = 500;
+      const raceGrace = (p: Promise<string>): Promise<string> =>
+        Promise.race([
+          p,
+          new Promise<string>((resolve) => {
+            const t = setTimeout(() => resolve(""), graceMs);
+            (t as unknown as { unref?: () => void }).unref?.();
+          }),
         ]);
+      const [stdoutText, stderrText] = timedOut
+        ? await Promise.all([raceGrace(stdoutPromise), raceGrace(stderrPromise)])
+        : await Promise.all([stdoutPromise, stderrPromise]);
       if (stdoutText.length > 0) process.stdout.write(stdoutText);
       if (stderrText.length > 0) process.stderr.write(stderrText);
       return {
