@@ -75,6 +75,18 @@ jobs:
           VERSION=$(jq -r '."."' .release-please-manifest.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Pin install.sh to upcoming release tag
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The committed install.sh has VERSION="latest" as its default.
+          # For the copy that ships with this release, pin it to the tag
+          # that's about to be published so that a user downloading
+          # install.sh from release vX.Y.Z installs exactly vX.Y.Z.
+          sed -i "s|^VERSION=\"latest\"|VERSION=\"$TAG\"|" scripts/install.sh
+          grep '^VERSION=' scripts/install.sh
+
       - name: Upsert preview draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -87,9 +99,10 @@ jobs:
           NOTES=$(cat <<EOF
           Preview build for upcoming **v${VERSION}** (from #${PR_NUMBER}).
 
-          These binaries were compiled from the release-please PR head and will
-          be promoted to the real release when the PR merges. Do not link to
-          this draft — it's ephemeral and gets overwritten on every PR update.
+          These binaries and the pinned install.sh were compiled from the
+          release-please PR head and will be promoted to the real release
+          when the PR merges. Do not link to this draft — it's ephemeral
+          and gets overwritten on every PR update.
 
           See: ${PR_HTML_URL}
           EOF
@@ -104,4 +117,4 @@ jobs:
             --draft \
             --title "Preview build (v${VERSION})" \
             --notes "$NOTES" \
-            ./bin/*
+            ./bin/* scripts/install.sh

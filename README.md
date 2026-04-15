@@ -22,7 +22,7 @@
 ## Install
 
 ```bash
-curl -fsSL https://agent-hooks.dev/install.sh | sh
+curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh
 ```
 
 That's it. Single standalone binary, no Node/Bun required. Lands at
@@ -34,13 +34,13 @@ That's it. Single standalone binary, no Node/Bun required. Lands at
 **Pin a version:**
 
 ```bash
-curl -fsSL https://agent-hooks.dev/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh -s -- --version v0.1.0
 ```
 
 **Install somewhere other than `~/.local/bin`:**
 
 ```bash
-curl -fsSL https://agent-hooks.dev/install.sh | sh -s -- --dir /usr/local/bin
+curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh -s -- --dir /usr/local/bin
 ```
 
 **GitHub Action (CI only, no local install needed):**

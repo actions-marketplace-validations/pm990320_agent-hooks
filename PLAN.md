@@ -1988,10 +1988,10 @@ One install path, one code path.
 **Option 1 — standalone binary (recommended):**
 ```bash
 # macOS / Linux
-curl -fsSL https://agent-hooks.dev/install.sh | sh
+curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh
 
 # or pin a version
-curl -fsSL https://agent-hooks.dev/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh -s -- --version v0.1.0
 ```
 
 The install script:
@@ -2057,7 +2057,7 @@ own README:
 ```
 ## Development
 
-This project uses [agent-hooks](https://agent-hooks.dev) for CI and
+This project uses [agent-hooks](https://github.com/pm990320/agent-hooks) for CI and
 pre-commit hooks.
 
 - `agent-hooks ci` — run the full CI pipeline locally

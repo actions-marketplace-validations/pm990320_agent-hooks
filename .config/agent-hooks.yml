@@ -53,6 +53,14 @@ steps:
     invocation: project
     tags: [fast]
 
+  commitlint:
+    # Enforce Conventional Commits so release-please can parse history.
+    # commitlint --edit (no arg) reads .git/COMMIT_EDITMSG relative to
+    # the git root, which is where agent-hooks runs hook dispatches.
+    run: bunx commitlint --edit
+    invocation: project
+    tags: [fast, lint]
+
   license-audit:
     # Fail the build if any production dependency ships under a license
     # outside the allow-list. Runs only when the dependency graph
@@ -85,10 +93,15 @@ pipelines:
   reinstall:
     steps: [install-deps]
 
+  commit-msg:
+    steps: [commitlint]
+
 git:
   hooks:
     pre-commit:
       pipeline: pre-commit
+    commit-msg:
+      pipeline: commit-msg
     post-merge:
       pipeline: reinstall
     post-checkout:

@@ -38,9 +38,9 @@ jobs:
           set -euo pipefail
 
           # The real draft release was just created by release-please (draft: true
-          # in release-please-config.json). Copy the pre-built binaries from the
-          # `preview` draft into it, then publish. If the preview is missing,
-          # fail — we don't silently rebuild.
+          # in release-please-config.json). Copy every asset from the `preview`
+          # draft into it — binaries AND the version-pinned install.sh — then
+          # publish. If the preview is missing, fail: we don't silently rebuild.
 
           if ! gh release view preview >/dev/null 2>&1; then
             echo "::error::No 'preview' draft release found. Did release-draft.yml run on the release PR?"
