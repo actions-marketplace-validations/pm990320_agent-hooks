@@ -9,6 +9,15 @@ import {
 } from "../hooks/registry.ts";
 import type { AgentFs, AgentInstallScope } from "../hooks/types.ts";
 import {
+  AGENTS_MD_TARGETS,
+  installAgentsMdBlock,
+  statusAgentsMdBlock,
+  uninstallAgentsMdBlock,
+  type AgentsMdFs,
+  type AgentsMdOutcome,
+  type AgentsMdStatusEntry,
+} from "../integrations/agents-md/install.ts";
+import {
   defaultSkillFs,
   installSkill,
   resolveSkillPaths,
@@ -28,6 +37,21 @@ export interface AgentCommandDeps {
   readonly fs: InitFs;
   readonly skillFs?: SkillFs;
   readonly loadSkillTemplate?: () => Promise<string>;
+  /** Filesystem adapter for CLAUDE.md / AGENTS.md marker-block work. */
+  readonly agentsMdFs?: AgentsMdFs;
+}
+
+/**
+ * Adapt the InitFs shape into the narrower AgentsMdFs shape. Same
+ * underlying bytes — the marker-block installer doesn't need
+ * mkdirRecursive since it never creates new files.
+ */
+function asAgentsMdFs(initFs: InitFs): AgentsMdFs {
+  return {
+    exists: (p) => initFs.exists(p),
+    read: (p) => initFs.read(p),
+    write: (p, contents) => initFs.write(p, contents),
+  };
 }
 
 /**
@@ -197,6 +221,115 @@ export async function runSkillList(
   return 0;
 }
 
+// --- agent instructions install/uninstall/status -----------------------
+
+function agentsMdFsFor(deps: AgentCommandDeps): AgentsMdFs {
+  return deps.agentsMdFs ?? asAgentsMdFs(deps.fs);
+}
+
+function reportAgentsMdOutcomes(
+  deps: AgentCommandDeps,
+  outcomes: readonly AgentsMdOutcome[],
+): void {
+  for (const outcome of outcomes) {
+    if (outcome.action === "missing") {
+      deps.write(`  ·  ${outcome.path} (not present)\n`);
+      continue;
+    }
+    const label =
+      outcome.action === "inserted"
+        ? "wrote"
+        : outcome.action === "refreshed"
+          ? "updated"
+          : outcome.action === "removed"
+            ? "removed"
+            : "ok";
+    deps.write(`  ${label.padEnd(8)}${outcome.path}\n`);
+  }
+}
+
+function reportAgentsMdStatus(
+  deps: AgentCommandDeps,
+  entries: readonly AgentsMdStatusEntry[],
+): void {
+  for (const entry of entries) {
+    if (!entry.exists) {
+      deps.write(`  ·  ${entry.path} (not present)\n`);
+      continue;
+    }
+    if (!entry.blockPresent) {
+      deps.write(`  ·  ${entry.path} (no block)\n`);
+      continue;
+    }
+    const glyph = entry.inSync ? "✓" : "⚠";
+    const note = entry.inSync ? "in sync" : "stale — run `agent-hooks agent instructions install`";
+    deps.write(`  ${glyph}  ${entry.path} (${note})\n`);
+  }
+}
+
+/**
+ * `agent-hooks agent instructions install` — splice the constant
+ * agent-hooks marker block into CLAUDE.md / AGENTS.md wherever they
+ * already exist. Never creates the files.
+ */
+export async function runAgentsMdInstall(
+  deps: AgentCommandDeps,
+): Promise<number> {
+  const outcomes = await installAgentsMdBlock({
+    cwd: deps.cwd,
+    fs: agentsMdFsFor(deps),
+  });
+  deps.write("agent-hooks instructions:\n");
+  reportAgentsMdOutcomes(deps, outcomes);
+  const touched = outcomes.some(
+    (o) => o.action === "inserted" || o.action === "refreshed",
+  );
+  if (!touched) {
+    const anyPresent = outcomes.some((o) => o.action !== "missing");
+    if (!anyPresent) {
+      deps.write(
+        "\n  (no CLAUDE.md or AGENTS.md found — create one to opt in)\n",
+      );
+    }
+  }
+  return 0;
+}
+
+/**
+ * `agent-hooks agent instructions uninstall` — strip the marker block
+ * from CLAUDE.md / AGENTS.md wherever it's present.
+ */
+export async function runAgentsMdUninstall(
+  deps: AgentCommandDeps,
+): Promise<number> {
+  const outcomes = await uninstallAgentsMdBlock({
+    cwd: deps.cwd,
+    fs: agentsMdFsFor(deps),
+  });
+  deps.write("agent-hooks instructions:\n");
+  reportAgentsMdOutcomes(deps, outcomes);
+  return 0;
+}
+
+/**
+ * `agent-hooks agent instructions list` — probe each target and
+ * report presence + in-sync status for the marker block.
+ */
+export async function runAgentsMdList(
+  deps: AgentCommandDeps,
+): Promise<number> {
+  const entries = await statusAgentsMdBlock({
+    cwd: deps.cwd,
+    fs: agentsMdFsFor(deps),
+  });
+  deps.write("agent-hooks instructions:\n");
+  reportAgentsMdStatus(deps, entries);
+  return 0;
+}
+
+// Re-exported so tests can assert against the canonical target list.
+export { AGENTS_MD_TARGETS };
+
 export async function runSkillUninstall(
   args: SkillArgs,
   deps: AgentCommandDeps,
@@ -259,6 +392,7 @@ export function registerAgentCommand(
       ...(overrides.loadSkillTemplate
         ? { loadSkillTemplate: overrides.loadSkillTemplate }
         : {}),
+      ...(overrides.agentsMdFs ? { agentsMdFs: overrides.agentsMdFs } : {}),
     };
   }
 
@@ -324,6 +458,42 @@ export function registerAgentCommand(
     .description("Show installed skill locations across all known targets")
     .action(async () => {
       const code = await runSkillList(buildDeps());
+      if (code !== 0) throw new ExitError(code);
+    });
+
+  const instructions = agent
+    .command("instructions")
+    .description(
+      "Inject or remove the agent-hooks marker block in CLAUDE.md / AGENTS.md",
+    );
+
+  instructions
+    .command("install")
+    .description(
+      "Splice the agent-hooks block into CLAUDE.md / AGENTS.md if they exist",
+    )
+    .action(async () => {
+      const code = await runAgentsMdInstall(buildDeps());
+      if (code !== 0) throw new ExitError(code);
+    });
+
+  instructions
+    .command("uninstall")
+    .description(
+      "Strip the agent-hooks block from CLAUDE.md / AGENTS.md where present",
+    )
+    .action(async () => {
+      const code = await runAgentsMdUninstall(buildDeps());
+      if (code !== 0) throw new ExitError(code);
+    });
+
+  instructions
+    .command("list")
+    .description(
+      "Show which CLAUDE.md / AGENTS.md files carry the block and whether it's in sync",
+    )
+    .action(async () => {
+      const code = await runAgentsMdList(buildDeps());
       if (code !== 0) throw new ExitError(code);
     });
 

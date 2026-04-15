@@ -1331,6 +1331,148 @@ describe("runInitCommand — --with-skill / --no-skill", () => {
   });
 });
 
+describe("runInitCommand — CLAUDE.md / AGENTS.md marker block", () => {
+  test("auto-detects existing CLAUDE.md and injects the marker block", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/CLAUDE.md", "# Project rules\n\nBe nice.\n");
+    let out = "";
+    const { outcome } = await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: (t) => {
+          out += t;
+        },
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    // Outcome records the splice result.
+    const claude = outcome.agentsMd.find((o) =>
+      o.path.endsWith("CLAUDE.md"),
+    );
+    expect(claude?.action).toBe("inserted");
+    // File has the block + preserves the original content.
+    const written = memFs.files.get("/repo/CLAUDE.md")!;
+    expect(written).toContain("# Project rules");
+    expect(written).toContain("Be nice.");
+    expect(written).toContain("BEGIN AGENT-HOOKS INTEGRATION");
+    // Output line surfaces the action.
+    expect(out).toContain("agent-hooks block");
+  });
+
+  test("auto-detects AGENTS.md and reports CLAUDE.md as missing", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/AGENTS.md", "# Agent notes\n");
+    const { outcome } = await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    const agents = outcome.agentsMd.find((o) =>
+      o.path.endsWith("AGENTS.md"),
+    );
+    const claude = outcome.agentsMd.find((o) =>
+      o.path.endsWith("CLAUDE.md"),
+    );
+    expect(agents?.action).toBe("inserted");
+    expect(claude?.action).toBe("missing");
+    expect(memFs.files.has("/repo/CLAUDE.md")).toBe(false);
+  });
+
+  test("never creates CLAUDE.md / AGENTS.md when neither exists", async () => {
+    const memFs = mem();
+    const { outcome } = await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    expect(outcome.agentsMd.every((o) => o.action === "missing")).toBe(true);
+    expect(memFs.files.has("/repo/CLAUDE.md")).toBe(false);
+    expect(memFs.files.has("/repo/AGENTS.md")).toBe(false);
+  });
+
+  test("withAgentsMd: false suppresses the whole pass", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/CLAUDE.md", "# Claude\n");
+    const { outcome } = await runInitCommand(
+      { withAgentsMd: false },
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    expect(outcome.agentsMd).toEqual([]);
+    expect(memFs.files.get("/repo/CLAUDE.md")).toBe("# Claude\n");
+  });
+
+  test("second init re-run reports unchanged — the block is constant", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/CLAUDE.md", "# Claude\n");
+    await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    const snapshot = memFs.files.get("/repo/CLAUDE.md")!;
+    const { outcome } = await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    const claude = outcome.agentsMd.find((o) =>
+      o.path.endsWith("CLAUDE.md"),
+    );
+    expect(claude?.action).toBe("unchanged");
+    expect(memFs.files.get("/repo/CLAUDE.md")).toBe(snapshot);
+  });
+
+  test("--dry-run reports the planned action without writing", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/CLAUDE.md", "# Claude\n");
+    const { outcome } = await runInitCommand(
+      { dryRun: true },
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    const claude = outcome.agentsMd.find((o) =>
+      o.path.endsWith("CLAUDE.md"),
+    );
+    expect(claude?.action).toBe("inserted");
+    // File unchanged under dryRun.
+    expect(memFs.files.get("/repo/CLAUDE.md")).toBe("# Claude\n");
+  });
+});
+
 describe("registerInitCommand", () => {
   test("parses flags and runs successfully", async () => {
     const program = new Command().exitOverride();

@@ -36,6 +36,7 @@ agent-hooks init [--force] [--dry-run]
                  [--with-postinstall] [--no-postinstall]
                  [--postinstall-mode append|replace|skip]
                  [--with-skill <target>] [--no-skill]
+                 [--no-agents-md]
 ```
 
 - `--force` — overwrite existing files, backing them up to `.bak`
@@ -58,6 +59,9 @@ agent-hooks init [--force] [--dry-run]
   the named target (`claude`, `cursor`, `codex`, or `auto` to
   install all three)
 - `--no-skill` — explicitly skip the skill install
+- `--no-agents-md` — skip the CLAUDE.md / AGENTS.md marker block
+  injection (default: auto-detect — inject into every target that
+  already exists, never create new files)
 
 On conflict (an existing file differs from what init would write),
 init shows a unified diff and prompts `[k]eep / [o]verwrite /
@@ -160,6 +164,9 @@ agent-hooks agent list
 agent-hooks agent skill install <target> [--project]
 agent-hooks agent skill uninstall <target> [--project]
 agent-hooks agent skill list
+agent-hooks agent instructions install
+agent-hooks agent instructions uninstall
+agent-hooks agent instructions list
 ```
 
 - `agent install <name>` — write the agent's native settings file
@@ -172,6 +179,14 @@ agent-hooks agent skill list
 - `agent skill uninstall <target>` — remove the installed skill.
 - `agent skill list` — show installed skill locations across every
   known target × scope.
+- `agent instructions install` — splice the agent-hooks marker
+  block into `CLAUDE.md` and/or `AGENTS.md` wherever they already
+  exist. Never creates the files. The block body is a constant
+  (identical bytes across every project) so the files stay prompt-
+  cacheable for coding agents.
+- `agent instructions uninstall` — strip the marker block.
+- `agent instructions list` — report which files carry the block
+  and whether it's in sync with the current agent-hooks version.
 
 ### `beads`
 

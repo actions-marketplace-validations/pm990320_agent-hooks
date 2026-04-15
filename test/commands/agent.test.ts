@@ -6,6 +6,9 @@ import {
   registerAgentCommand,
   runAgentInstall,
   runAgentList,
+  runAgentsMdInstall,
+  runAgentsMdList,
+  runAgentsMdUninstall,
   runSkillInstall,
   runSkillList,
   runSkillUninstall,
@@ -675,5 +678,228 @@ describe("defaultAgentDeps", () => {
     expect(typeof defaultAgentDeps.load).toBe("function");
     expect(typeof defaultAgentDeps.homeDir).toBe("string");
     expect(defaultAgentDeps.fs).toBeDefined();
+  });
+});
+
+describe("runAgentsMdInstall / Uninstall / List", () => {
+  function memAgentsMdFs(initial: Record<string, string> = {}) {
+    const files = new Map<string, string>(Object.entries(initial));
+    return {
+      files,
+      exists: (p: string) => Promise.resolve(files.has(p)),
+      read: (p: string) => {
+        const v = files.get(p);
+        if (v === undefined) return Promise.reject(new Error(`ENOENT ${p}`));
+        return Promise.resolve(v);
+      },
+      write: (p: string, contents: string) => {
+        files.set(p, contents);
+        return Promise.resolve();
+      },
+    };
+  }
+
+  test("install splices the block into existing CLAUDE.md", async () => {
+    const fs = memAgentsMdFs({ "/repo/CLAUDE.md": "# Claude\n" });
+    let out = "";
+    const code = await runAgentsMdInstall(
+      makeDeps({
+        write: (t) => {
+          out += t;
+        },
+        agentsMdFs: fs,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(fs.files.get("/repo/CLAUDE.md")).toContain("BEGIN AGENT-HOOKS");
+    expect(out).toContain("agent-hooks instructions");
+    expect(out).toContain("wrote");
+    expect(out).toContain("CLAUDE.md");
+  });
+
+  test("install reports missing files with a dot glyph", async () => {
+    const fs = memAgentsMdFs();
+    let out = "";
+    const code = await runAgentsMdInstall(
+      makeDeps({
+        write: (t) => {
+          out += t;
+        },
+        agentsMdFs: fs,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain("not present");
+    expect(out).toContain(
+      "(no CLAUDE.md or AGENTS.md found — create one to opt in)",
+    );
+  });
+
+  test("uninstall strips the block and reports removed", async () => {
+    const fs = memAgentsMdFs({ "/repo/CLAUDE.md": "# Claude\n" });
+    await runAgentsMdInstall(makeDeps({ agentsMdFs: fs }));
+    let out = "";
+    const code = await runAgentsMdUninstall(
+      makeDeps({
+        write: (t) => {
+          out += t;
+        },
+        agentsMdFs: fs,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(fs.files.get("/repo/CLAUDE.md")).not.toContain(
+      "BEGIN AGENT-HOOKS",
+    );
+    expect(out).toContain("removed");
+  });
+
+  test("list reports ✓ in-sync after install", async () => {
+    const fs = memAgentsMdFs({ "/repo/CLAUDE.md": "# Claude\n" });
+    await runAgentsMdInstall(makeDeps({ agentsMdFs: fs }));
+    let out = "";
+    const code = await runAgentsMdList(
+      makeDeps({
+        write: (t) => {
+          out += t;
+        },
+        agentsMdFs: fs,
+      }),
+    );
+    expect(code).toBe(0);
+    expect(out).toContain("✓");
+    expect(out).toContain("in sync");
+  });
+
+  test("list reports '(no block)' for files without markers", async () => {
+    const fs = memAgentsMdFs({
+      "/repo/CLAUDE.md": "# Claude\n\nno markers\n",
+    });
+    let out = "";
+    await runAgentsMdList(
+      makeDeps({
+        write: (t) => {
+          out += t;
+        },
+        agentsMdFs: fs,
+      }),
+    );
+    expect(out).toContain("no block");
+  });
+
+  test("list reports '(not present)' for missing files", async () => {
+    const fs = memAgentsMdFs();
+    let out = "";
+    await runAgentsMdList(
+      makeDeps({
+        write: (t) => {
+          out += t;
+        },
+        agentsMdFs: fs,
+      }),
+    );
+    expect(out).toContain("not present");
+  });
+
+  test("list reports ⚠ stale when a block has a mismatched hash", async () => {
+    // Hand-assemble a block with a deliberately-old hash so the
+    // installer sees drift.
+    const stale =
+      "<!-- BEGIN AGENT-HOOKS INTEGRATION v:1 hash:aaaaaaaaaaaa -->\nold body\n<!-- END AGENT-HOOKS INTEGRATION -->";
+    const fs = memAgentsMdFs({
+      "/repo/CLAUDE.md": `# Claude\n\n${stale}\n`,
+    });
+    let out = "";
+    await runAgentsMdList(
+      makeDeps({
+        write: (t) => {
+          out += t;
+        },
+        agentsMdFs: fs,
+      }),
+    );
+    expect(out).toContain("⚠");
+    expect(out).toContain("stale");
+  });
+});
+
+describe("registerAgentCommand — instructions subcommands", () => {
+  function memAgentsMdFs(initial: Record<string, string> = {}) {
+    const files = new Map<string, string>(Object.entries(initial));
+    return {
+      files,
+      exists: (p: string) => Promise.resolve(files.has(p)),
+      read: (p: string) => {
+        const v = files.get(p);
+        if (v === undefined) return Promise.reject(new Error(`ENOENT ${p}`));
+        return Promise.resolve(v);
+      },
+      write: (p: string, contents: string) => {
+        files.set(p, contents);
+        return Promise.resolve();
+      },
+    };
+  }
+
+  test("`agent instructions install` wires end-to-end", async () => {
+    const program = new Command().exitOverride();
+    const amFs = memAgentsMdFs({ "/repo/CLAUDE.md": "# Claude\n" });
+    registerAgentCommand(program, {
+      cwd: "/repo",
+      homeDir: "/home/t",
+      write: () => {},
+      writeErr: () => {},
+      load: () => Promise.resolve(claudeConfig()),
+      fs: memFs(),
+      agentsMdFs: amFs,
+    });
+    await program.parseAsync(["agent", "instructions", "install"], {
+      from: "user",
+    });
+    expect(amFs.files.get("/repo/CLAUDE.md")).toContain("BEGIN AGENT-HOOKS");
+  });
+
+  test("`agent instructions uninstall` strips the block", async () => {
+    const program = new Command().exitOverride();
+    const amFs = memAgentsMdFs({ "/repo/CLAUDE.md": "# Claude\n" });
+    registerAgentCommand(program, {
+      cwd: "/repo",
+      homeDir: "/home/t",
+      write: () => {},
+      writeErr: () => {},
+      load: () => Promise.resolve(claudeConfig()),
+      fs: memFs(),
+      agentsMdFs: amFs,
+    });
+    await program.parseAsync(["agent", "instructions", "install"], {
+      from: "user",
+    });
+    await program.parseAsync(["agent", "instructions", "uninstall"], {
+      from: "user",
+    });
+    expect(amFs.files.get("/repo/CLAUDE.md")).not.toContain(
+      "BEGIN AGENT-HOOKS",
+    );
+  });
+
+  test("`agent instructions list` wires to runAgentsMdList", async () => {
+    const program = new Command().exitOverride();
+    const amFs = memAgentsMdFs({ "/repo/AGENTS.md": "# Agents\n" });
+    let out = "";
+    registerAgentCommand(program, {
+      cwd: "/repo",
+      homeDir: "/home/t",
+      write: (t) => {
+        out += t;
+      },
+      writeErr: () => {},
+      load: () => Promise.resolve(claudeConfig()),
+      fs: memFs(),
+      agentsMdFs: amFs,
+    });
+    await program.parseAsync(["agent", "instructions", "list"], {
+      from: "user",
+    });
+    expect(out).toContain("instructions");
   });
 });

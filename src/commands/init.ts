@@ -25,6 +25,13 @@ import {
   type PostinstallFs,
 } from "../integrations/node/postinstall.ts";
 import {
+  AGENTS_MD_TARGETS,
+  installAgentsMdBlock,
+  type AgentsMdFs,
+  type AgentsMdOutcome,
+  type AgentsMdTarget,
+} from "../integrations/agents-md/install.ts";
+import {
   defaultSkillFs,
   installSkill,
   type SkillFs,
@@ -75,6 +82,12 @@ export interface InitCommandDeps {
    * directories; defaults to the real fs adapter.
    */
   readonly skillFs?: SkillFs;
+  /**
+   * Filesystem adapter for CLAUDE.md / AGENTS.md marker-block
+   * splicing. Tests inject an in-memory one; defaults to the real
+   * fs adapter wrapping InitFs.
+   */
+  readonly agentsMdFs?: AgentsMdFs;
 }
 
 export interface InitArgs {
@@ -110,6 +123,19 @@ export interface InitArgs {
    * keeps scripts forward-compatible with future interactive prompts.
    */
   readonly noSkill?: boolean;
+  /**
+   * Inject the agent-hooks marker block into CLAUDE.md / AGENTS.md.
+   * - Undefined (default): auto-detect — inject into every target that
+   *   already exists under `cwd`, skip any that don't.
+   * - Explicit target list: only touch those files (still skip if
+   *   they don't exist — init never creates these files).
+   * - `false`: never touch CLAUDE.md / AGENTS.md.
+   *
+   * Init never creates CLAUDE.md / AGENTS.md from scratch; those files
+   * belong to the user. The block body is a constant — identical bytes
+   * across every project so the files stay prompt-cacheable.
+   */
+  readonly withAgentsMd?: readonly AgentsMdTarget[] | false;
   /**
    * Control how `postinstall` is patched into `package.json`:
    *
@@ -166,6 +192,8 @@ export interface InitOutcome {
   readonly detectors: readonly string[];
   /** Skill targets installed (or planned) during init, if any. */
   readonly skillsInstalled: readonly string[];
+  /** Outcome of the CLAUDE.md / AGENTS.md marker-block splice. */
+  readonly agentsMd: readonly AgentsMdOutcome[];
 }
 
 function initFsAsDetectorFs(fs: InitFs): DetectorFs {
@@ -634,6 +662,27 @@ export async function runInitCommand(
     });
   }
 
+  // Inject the agent-hooks marker block into CLAUDE.md / AGENTS.md.
+  // Auto-detect by default — any target file that already exists gets
+  // the block, missing ones are ignored silently. --no-agents-md (via
+  // `withAgentsMd: false`) disables the whole pass.
+  const agentsMdOutcomes = await maybeInstallAgentsMdBlock({
+    deps,
+    args,
+  });
+  for (const outcome of agentsMdOutcomes) {
+    if (outcome.action === "missing") continue;
+    const label =
+      outcome.action === "inserted"
+        ? "wrote"
+        : outcome.action === "refreshed"
+          ? "updated"
+          : outcome.action === "removed"
+            ? "removed"
+            : "ok";
+    deps.write(`  ${label.padEnd(8)}${outcome.path} (agent-hooks block)\n`);
+  }
+
   deps.write(`✓ init ${args.dryRun ? "(dry run)" : "complete"}\n`);
   return {
     code: 0,
@@ -644,7 +693,35 @@ export async function runInitCommand(
       postinstall,
       detectors: fragment.detectorNames,
       skillsInstalled: skillInstalled,
+      agentsMd: agentsMdOutcomes,
     },
+  };
+}
+
+async function maybeInstallAgentsMdBlock(input: {
+  deps: InitCommandDeps;
+  args: InitArgs;
+}): Promise<readonly AgentsMdOutcome[]> {
+  const { deps, args } = input;
+  if (args.withAgentsMd === false) return [];
+  const fs = deps.agentsMdFs ?? initFsAsAgentsMdFs(deps.fs);
+  const targets =
+    Array.isArray(args.withAgentsMd) && args.withAgentsMd.length > 0
+      ? args.withAgentsMd
+      : AGENTS_MD_TARGETS;
+  return installAgentsMdBlock({
+    cwd: deps.cwd,
+    fs,
+    targets,
+    ...(args.dryRun ? { dryRun: true } : {}),
+  });
+}
+
+function initFsAsAgentsMdFs(fs: InitFs): AgentsMdFs {
+  return {
+    exists: (p) => fs.exists(p),
+    read: (p) => fs.read(p),
+    write: (p, contents) => fs.write(p, contents),
   };
 }
 
@@ -784,6 +861,10 @@ export function registerInitCommand(
       )}|auto)`,
     )
     .option("--no-skill", "explicitly skip the skill install")
+    .option(
+      "--no-agents-md",
+      "skip injecting the agent-hooks marker block into CLAUDE.md / AGENTS.md",
+    )
     .action(async function (this: Command) {
       const flags: {
         force?: boolean;
@@ -796,6 +877,7 @@ export function registerInitCommand(
         postinstallMode?: string;
         withSkill?: string;
         skill?: boolean;
+        agentsMd?: boolean;
       } = this.opts();
       const deps: InitCommandDeps = {
         cwd: overrides.cwd ?? process.cwd(),
@@ -821,6 +903,7 @@ export function registerInitCommand(
           : {}),
         ...(flags.withSkill ? { withSkill: flags.withSkill } : {}),
         ...(flags.skill === false ? { noSkill: true } : {}),
+        ...(flags.agentsMd === false ? { withAgentsMd: false as const } : {}),
       };
       const { code } = await runInitCommand(args, deps);
       if (code !== 0) throw new ExitError(code);

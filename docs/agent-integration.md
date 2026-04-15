@@ -150,6 +150,42 @@ Pass `--with-skill <target>` to `agent-hooks init` (or
 to install the skill as part of scaffolding. `--no-skill`
 suppresses it.
 
+## CLAUDE.md / AGENTS.md marker block
+
+Agents reading `CLAUDE.md` or `AGENTS.md` at the project root
+don't automatically know that agent-hooks is the canonical dev-loop
+entry point. To teach them, agent-hooks can splice a short
+instruction block into those files, delimited by HTML-comment
+markers:
+
+```
+<!-- BEGIN AGENT-HOOKS INTEGRATION v:1 hash:… -->
+## agent-hooks
+...
+<!-- END AGENT-HOOKS INTEGRATION -->
+```
+
+The block body is **deliberately constant** — the same bytes for
+every project, so the files stay prompt-cacheable across repos.
+Project-specific details (pipeline names, fix-capable steps) stay
+out of the block; the block points agents at `agent-hooks list`
+instead.
+
+`agent-hooks init` injects the block automatically when either file
+already exists in the cwd; it never creates these files. Pass
+`--no-agents-md` to suppress. Outside of init:
+
+```
+agent-hooks agent instructions install     # splice the block
+agent-hooks agent instructions uninstall   # strip the block
+agent-hooks agent instructions list        # show status + drift
+```
+
+The installer never touches content outside the markers — hand
+edits elsewhere in the file are preserved byte-for-byte. Re-running
+`install` after an agent-hooks upgrade refreshes a stale block in
+place.
+
 ## Testing hook handlers
 
 The easiest way to exercise a handler without an agent running is

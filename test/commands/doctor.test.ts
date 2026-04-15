@@ -495,6 +495,89 @@ describe("runDoctor", () => {
     await runDoctor(deps);
     expect(stdout()).not.toContain("Playwright detected without playwright-checkpoint");
   });
+
+  test("reports CLAUDE.md as in-sync when the block is fresh", async () => {
+    const files = new Map<string, string>();
+    // Install the block into a scratch string, then seed our memfs
+    // so the hash stored in the file matches what doctor expects.
+    const { installAgentsMdBlock } = await import(
+      "../../src/integrations/agents-md/install.ts"
+    );
+    const amFs = {
+      exists: (p: string) => Promise.resolve(files.has(p)),
+      read: (p: string) => {
+        const v = files.get(p);
+        if (v === undefined) return Promise.reject(new Error(`ENOENT ${p}`));
+        return Promise.resolve(v);
+      },
+      write: (p: string, c: string) => {
+        files.set(p, c);
+        return Promise.resolve();
+      },
+    };
+    files.set("/repo/CLAUDE.md", "# Claude\n");
+    await installAgentsMdBlock({ cwd: "/repo", fs: amFs });
+
+    const { deps, stdout } = fakeDeps({
+      load: loaded(),
+      agentsMdFs: amFs,
+    });
+    await runDoctor(deps);
+    expect(stdout()).toContain("agent-hooks instructions:");
+    expect(stdout()).toContain("/repo/CLAUDE.md — in sync");
+  });
+
+  test("reports '— stale' when the block hash doesn't match", async () => {
+    const files = new Map<string, string>();
+    const staleBlock =
+      "<!-- BEGIN AGENT-HOOKS INTEGRATION v:1 hash:aaaaaaaaaaaa -->\nold\n<!-- END AGENT-HOOKS INTEGRATION -->";
+    files.set("/repo/CLAUDE.md", `# Claude\n\n${staleBlock}\n`);
+    const amFs = {
+      exists: (p: string) => Promise.resolve(files.has(p)),
+      read: (p: string) =>
+        Promise.resolve(files.get(p) ?? Promise.reject(new Error("ENOENT"))),
+      write: (p: string, c: string) => {
+        files.set(p, c);
+        return Promise.resolve();
+      },
+    };
+    const { deps, stdout } = fakeDeps({
+      load: loaded(),
+      agentsMdFs: amFs,
+    });
+    await runDoctor(deps);
+    expect(stdout()).toContain("— stale");
+    expect(stdout()).toContain("agent-hooks agent instructions install");
+  });
+
+  test("reports '(no block)' when CLAUDE.md exists without markers", async () => {
+    const files = new Map<string, string>();
+    files.set("/repo/CLAUDE.md", "# Claude\n\nno markers\n");
+    const amFs = {
+      exists: (p: string) => Promise.resolve(files.has(p)),
+      read: (p: string) =>
+        Promise.resolve(files.get(p) ?? Promise.reject(new Error("ENOENT"))),
+      write: (p: string, c: string) => {
+        files.set(p, c);
+        return Promise.resolve();
+      },
+    };
+    const { deps, stdout } = fakeDeps({
+      load: loaded(),
+      agentsMdFs: amFs,
+    });
+    await runDoctor(deps);
+    expect(stdout()).toContain("no block");
+  });
+
+  test("agentsMdFs: null skips the section entirely", async () => {
+    const { deps, stdout } = fakeDeps({
+      load: loaded(),
+      agentsMdFs: null,
+    });
+    await runDoctor(deps);
+    expect(stdout()).not.toContain("agent-hooks instructions");
+  });
 });
 
 describe("registerDoctorCommand", () => {

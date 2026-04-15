@@ -67,3 +67,53 @@ _Add a brief overview of your project architecture_
 ## Conventions & Patterns
 
 _Add your project-specific conventions here_
+
+<!-- BEGIN AGENT-HOOKS INTEGRATION v:1 hash:0845b391a26f -->
+## agent-hooks
+
+This project uses [agent-hooks](https://github.com/pm990320/agent-hooks)
+as the canonical entry point for CI, linting, tests, and other dev-loop
+commands. **Prefer the commands below over bare tool invocations** —
+they honor the project's configured pipelines, file scopes, and skip
+rules.
+
+### Core commands
+
+- `agent-hooks ci` — run the full CI pipeline locally (exactly what GitHub Actions runs)
+- `agent-hooks run <pipeline-or-step>` — run a specific pipeline or step
+- `agent-hooks lint` / `test` / `build` / `typecheck` / `format` — shortcuts for the same-named pipelines
+- `agent-hooks fix <step>` — run a step's auto-fix command (e.g. `agent-hooks fix lint`)
+- `agent-hooks list` — list every configured step and pipeline for this project
+- `agent-hooks doctor` — validate config, preflight, and environment
+
+Run `agent-hooks list` first to discover what pipelines and steps this
+project defines. Run `agent-hooks --help` for the full CLI.
+
+### Scope flags
+
+Shared by `run` / `ci` / shortcuts:
+
+- `--files <paths…>` — explicit files (what agent hooks pass through)
+- `--staged` — files staged for commit
+- `--changed` — files changed vs the default branch merge-base
+- `--all` — every tracked file
+
+### Skipping hooks
+
+When you legitimately need to bypass the pipeline for a commit:
+
+- Commit message tag: `[skip agent-hooks]` or `[skip ci]` — skips everything for that commit
+- Commit message scoped: `[skip lint,test]` — skips specific steps by name
+- Env var: `AGENT_HOOKS_SKIP=1` (skip all) or `AGENT_HOOKS_SKIP=lint,test` (by name)
+- Env var: `AGENT_HOOKS_ONLY=lint` to whitelist a single step
+- CLI flags: `--skip <names>` / `--only <names>` on `run` / `ci`
+
+Don't skip just to make a red build green — fix the underlying issue.
+
+### Piping output
+
+Each step emits an `---agent-hooks:next-step---` YAML block to stderr
+with structured feedback (status, exit code, next action). Pass
+`--no-prompts` to suppress these blocks when the caller doesn't need
+them.
+<!-- END AGENT-HOOKS INTEGRATION -->

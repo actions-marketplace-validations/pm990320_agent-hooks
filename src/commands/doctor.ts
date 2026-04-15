@@ -5,6 +5,10 @@ import { loadConfig, type LoadedConfig } from "../config/load.ts";
 import type { Config } from "../config/schema.ts";
 import { AGENT_HANDLERS } from "../hooks/registry.ts";
 import type { AgentDetection, AgentFs, AgentHandler } from "../hooks/types.ts";
+import {
+  statusAgentsMdBlock,
+  type AgentsMdFs,
+} from "../integrations/agents-md/install.ts";
 import { configHash } from "../integrations/git/hash.ts";
 import {
   defaultHookFs,
@@ -237,6 +241,8 @@ export interface DoctorDeps {
   readonly envResolver?: EnvResolver | null;
   /** Base env to feed into env-resolution. Defaults to `process.env`. */
   readonly env?: Record<string, string>;
+  /** Override the CLAUDE.md / AGENTS.md fs adapter; `null` skips the section. */
+  readonly agentsMdFs?: AgentsMdFs | null;
 }
 
 export interface DoctorReport {
@@ -417,6 +423,47 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     }
   }
 
+  // Agent-hooks marker block presence in CLAUDE.md / AGENTS.md. Purely
+  // informational — surfaces drift after an upgrade so users know to
+  // run `agent-hooks agent instructions install` to refresh the block.
+  if (deps.agentsMdFs !== null) {
+    const amFs: AgentsMdFs =
+      deps.agentsMdFs ??
+      ({
+        exists: async (p) => {
+          try {
+            await fs.access(p);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        read: (p) => fs.readFile(p, "utf8"),
+        write: (p, contents) => fs.writeFile(p, contents, "utf8"),
+      } satisfies AgentsMdFs);
+    const entries = await statusAgentsMdBlock({
+      cwd: deps.cwd,
+      fs: amFs,
+    });
+    const interesting = entries.filter((e) => e.exists);
+    if (interesting.length > 0) {
+      deps.write("agent-hooks instructions:\n");
+      for (const entry of interesting) {
+        if (!entry.blockPresent) {
+          deps.write(
+            `  · ${entry.path} — no block (run 'agent-hooks agent instructions install' to add)\n`,
+          );
+        } else if (!entry.inSync) {
+          deps.write(
+            `  ⚠ ${entry.path} — stale (run 'agent-hooks agent instructions install' to refresh)\n`,
+          );
+        } else {
+          deps.write(`  ✓ ${entry.path} — in sync\n`);
+        }
+      }
+    }
+  }
+
   // Playwright / Playwright-Checkpoint integration.
   const isPlaywright = await maybe(() => detectPlaywright(deps.cwd), false);
   const hasCheckpoint = await maybe(
@@ -495,6 +542,9 @@ export function registerDoctorCommand(
         load: overrides.load ?? defaultDoctorDeps.load,
         ...(overrides.preflightResolver
           ? { preflightResolver: overrides.preflightResolver }
+          : {}),
+        ...("agentsMdFs" in overrides
+          ? { agentsMdFs: overrides.agentsMdFs }
           : {}),
         ...("envResolver" in overrides
           ? { envResolver: overrides.envResolver }
