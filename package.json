@@ -21,12 +21,22 @@
   "license": "MIT",
   "author": "Patrick Menlove",
   "type": "module",
-  "private": true,
+  "bin": {
+    "agent-hooks": "./scripts/npm-bin.js"
+  },
+  "files": [
+    "scripts/npm-bin.js",
+    "scripts/npm-postinstall.js",
+    "schema.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "generate:schema": "bun run scripts/generate-schema.ts",
     "prebuild": "bun run generate:schema",
     "build": "bun build ./src/index.ts --compile --outfile ./bin/agent-hooks",
     "postbuild": "bash scripts/postbuild-sign.sh ./bin/agent-hooks",
+    "postinstall": "node scripts/npm-postinstall.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",

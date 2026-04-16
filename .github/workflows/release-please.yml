@@ -274,3 +274,32 @@ jobs:
             gh api -X POST "repos/$REPO/git/refs" \
               -f ref="refs/tags/$MAJOR_TAG" -f sha="$SHA"
           fi
+
+  # Publish the thin npm wrapper package. Runs AFTER promote-release so
+  # the GitHub release's binary assets are already live — the wrapper's
+  # postinstall downloads from `/releases/download/v<version>/...` at
+  # consumer install time, so publishing the npm package before the
+  # release would result in postinstall 404s until the release shipped.
+  publish-npm:
+    needs: [release-please, promote-release]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    # `id-token: write` enables npm provenance (--provenance flag) so
+    # published packages carry a verifiable link back to this workflow.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public

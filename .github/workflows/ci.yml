@@ -126,3 +126,100 @@ jobs:
           path: bin/${{ matrix.artifact }}
           if-no-files-found: error
           retention-days: 7
+
+  # Node-runtime integration test for the npm wrapper package. Exercises
+  # scripts/npm-bin.js end-to-end: pack, install into a clean consumer
+  # dir under a real Node runtime (not Bun), invoke via the symlink
+  # npm places in .bin/, assert exit code and version string.
+  #
+  # Postinstall's download path is skipped here (AGENT_HOOKS_SKIP_POSTINSTALL=1)
+  # because the current package.json version typically doesn't yet
+  # correspond to a published GitHub release — every main push bumps
+  # its way toward a future release. The wrapper is still fully
+  # exercised: we pre-seed bin/agent-hooks with the just-built binary
+  # artifact from binary-matrix and the wrapper resolves it like it
+  # would a download.
+  npm-wrapper-smoke:
+    name: npm wrapper smoke test (Node)
+    needs: binary-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-hooks-linux-x64
+          path: /tmp/ah-artifact
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Pack
+        run: |
+          set -euo pipefail
+          npm pack
+          mv agent-hooks-*.tgz /tmp/agent-hooks.tgz
+          tar tzf /tmp/agent-hooks.tgz | sort
+
+      - name: Install in clean consumer dir under Node runtime
+        run: |
+          set -euo pipefail
+          mkdir /tmp/consumer
+          cd /tmp/consumer
+          printf '{"name":"consumer","version":"1.0.0","private":true}\n' > package.json
+          # Postinstall download is skipped; we pre-seed with the binary
+          # built one job up so the wrapper resolves to a real
+          # executable and we test the Node→native spawn path.
+          AGENT_HOOKS_SKIP_POSTINSTALL=1 npm install /tmp/agent-hooks.tgz
+          mkdir -p node_modules/agent-hooks/bin
+          cp /tmp/ah-artifact/agent-hooks-linux-x64 node_modules/agent-hooks/bin/agent-hooks
+          chmod +x node_modules/agent-hooks/bin/agent-hooks
+
+      - name: Exec via the wrapper
+        run: |
+          set -euo pipefail
+          cd /tmp/consumer
+          echo "=== --version ==="
+          ./node_modules/.bin/agent-hooks --version
+          echo "=== --help (truncated) ==="
+          ./node_modules/.bin/agent-hooks --help | head -5
+          echo "=== version stamp matches package.json ==="
+          expected=$(jq -r .version "$GITHUB_WORKSPACE/package.json")
+          actual=$(./node_modules/.bin/agent-hooks --version)
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::wrapper produced '$actual' but package.json declares '$expected'"
+            exit 1
+          fi
+          echo "ok: $actual"
+
+      - name: Exec respects AGENT_HOOKS_BINARY override
+        run: |
+          set -euo pipefail
+          chmod +x /tmp/ah-artifact/agent-hooks-linux-x64
+          AGENT_HOOKS_BINARY=/tmp/ah-artifact/agent-hooks-linux-x64 \
+            /tmp/consumer/node_modules/.bin/agent-hooks --version
+
+      - name: Exec handles missing binary gracefully
+        run: |
+          set -euo pipefail
+          # Simulate --ignore-scripts: remove the downloaded binary and
+          # assert the wrapper exits 127 with a useful error message
+          # rather than a cryptic spawn failure.
+          rm /tmp/consumer/node_modules/agent-hooks/bin/agent-hooks
+          cd /tmp/consumer
+          set +e
+          output=$(./node_modules/.bin/agent-hooks --version 2>&1)
+          code=$?
+          set -e
+          if [ "$code" -ne 127 ]; then
+            echo "::error::expected exit 127 when binary is missing, got $code"
+            echo "$output"
+            exit 1
+          fi
+          echo "$output" | grep -qi "native binary not found" || {
+            echo "::error::error message didn't match expected text"
+            echo "$output"
+            exit 1
+          }
+          echo "ok: missing-binary exit 127 with clear error"
