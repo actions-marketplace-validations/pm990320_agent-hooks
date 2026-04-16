@@ -50,7 +50,19 @@ async function listChangedFiles(
   // overlaps with unstaged changes on-branch, but not strictly. For the
   // v0.1 slice we conservatively union staged + changed. Tests document
   // this behavior.
-  const changed = await git.changed();
+  //
+  // In CI contexts (detached HEAD, no origin/main, no local main/master
+  // after actions/checkout with default fetch-depth: 1), git.changed()
+  // throws UnresolvableBaseRefError. For since: "head" the merge-base
+  // comparison isn't semantically required — staged already captures
+  // the PR's committed changes vs HEAD for the shallow-checkout case.
+  // Degrade gracefully rather than crashing the pipeline.
+  let changed: readonly string[] = [];
+  try {
+    changed = await git.changed();
+  } catch {
+    // No merge-base base ref available. Keep `staged` only.
+  }
   const union = new Set<string>();
   for (const p of staged) union.add(p);
   for (const p of changed) union.add(p);

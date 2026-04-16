@@ -18,6 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so agent-hooks' change-gates can resolve
+          # origin/main for `since: merge-base` comparisons, and
+          # `since: head` can reach changed() without throwing. The
+          # default fetch-depth: 1 gives a detached HEAD with no base
+          # ref, which crashed the pipeline runner pre-ah-8cq.
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:

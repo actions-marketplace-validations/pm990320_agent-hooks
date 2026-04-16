@@ -18,6 +18,15 @@ function stubGit(
   };
 }
 
+function stubGitWithChangedThrowing(staged: readonly string[]): GitRunner {
+  return {
+    staged: () => Promise.resolve(staged),
+    changed: () =>
+      Promise.reject(new Error("unresolvable base ref origin/main (tried: origin/main, main, master)")),
+    all: () => Promise.resolve([]),
+  };
+}
+
 function step(overrides: unknown): Step {
   return StepSchema.parse({
     run: "echo",
@@ -63,6 +72,29 @@ describe("evaluateGate", () => {
       stubGit([], ["bun.lockb"]),
     );
     expect(result?.shouldRun).toBe(true);
+  });
+
+  test("since: head degrades to staged-only when git.changed() throws", async () => {
+    // CI PR context: actions/checkout default fetch-depth: 1 leaves a
+    // detached HEAD with no origin/main, main, or master ref. git.changed()
+    // throws UnresolvableBaseRefError. For since: "head" the merge-base
+    // comparison isn't semantically required — staged captures the
+    // working-tree diff we actually care about. Crash would propagate out
+    // of the pipeline runner and break every CI run with a when-changed
+    // gate; degrade gracefully instead.
+    const s = step({
+      "when-changed": { paths: "package.json", since: "head" },
+    });
+    // Staged is empty (clean CI checkout) → gate should skip, NOT crash.
+    const result = await evaluateGate(s, stubGitWithChangedThrowing([]));
+    expect(result?.shouldRun).toBe(false);
+
+    // When something IS staged, the staged entries are still considered.
+    const stagedHit = await evaluateGate(
+      s,
+      stubGitWithChangedThrowing(["package.json"]),
+    );
+    expect(stagedHit?.shouldRun).toBe(true);
   });
 
   test("since: merge-base uses only git.changed()", async () => {
