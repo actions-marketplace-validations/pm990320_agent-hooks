@@ -159,8 +159,15 @@ agents:
     expect(marker).toContain("files: src/a.txt");
   });
 
-  test("sendPromptToFakeAgent propagates hook failure exit code", async () => {
-    // Config uses a step that exits non-zero.
+  test("sendPromptToFakeAgent remaps hook failure to exit 2 so Claude sees stderr", async () => {
+    // Config uses a step that exits 7. Claude Code, Codex, and Gemini
+    // CLI all treat exit 2 on a hook as "feed stderr back to the model
+    // as non-blocking feedback" — other non-zero codes are silently
+    // shown to the USER only. agent-hooks remaps any pipeline failure
+    // to exit 2 so our ---agent-hooks:next-step--- stderr blocks reach
+    // the coding agent for self-correction. The underlying step's
+    // original exit 7 is surfaced via the structured step outcome,
+    // not via the process exit code.
     const breakingConfig = `
 name: breaking
 steps:
@@ -191,7 +198,7 @@ agents:
       },
       cwd: fixture.cwd,
     });
-    expect(result.hookResult.exitCode).toBe(7);
+    expect(result.hookResult.exitCode).toBe(2);
   });
 
   test("agent install + fireAgentHook round-trip: claude config is written, then a hook fires", async () => {

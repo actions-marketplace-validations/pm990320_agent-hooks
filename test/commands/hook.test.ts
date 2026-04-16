@@ -476,6 +476,32 @@ describe("runHookCommand — claude agent", () => {
     expect(code).toBe(0);
   });
 
+  test("remaps pipeline failure to exit 2 so Claude sees stderr feedback", async () => {
+    // When a step in the dispatched pipeline fails, Claude Code's
+    // hook model treats exit 2 specially: stderr is fed back to the
+    // model as context. Exit 1 (or any other non-zero) is treated as
+    // a "non-blocking error" that's only shown to the USER, bypassing
+    // the agent. Remap any pipeline-failure exit code to 2 so our
+    // ---agent-hooks:next-step--- stderr blocks actually reach the
+    // coding agent and it can self-correct.
+    const code = await runHookCommand("claude", "PostToolUse", {
+      cwd: "/repo",
+      write: () => {},
+      writeErr: () => {},
+      load: () => Promise.resolve(stubLoadedWithClaude()),
+      makeGit: () => stubGit(),
+      exec: fakeExec(1),
+      readStdin: fakeStdin(
+        JSON.stringify({
+          tool_name: "Edit",
+          tool_input: { file_paths: ["src/a.ts"] },
+        }),
+      ),
+      env: {},
+    });
+    expect(code).toBe(2);
+  });
+
   test("returns 2 when the matched pipeline is missing", async () => {
     let err = "";
     const code = await runHookCommand("claude", "Stop", {

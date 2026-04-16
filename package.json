@@ -26,6 +26,7 @@
     "generate:schema": "bun run scripts/generate-schema.ts",
     "prebuild": "bun run generate:schema",
     "build": "bun build ./src/index.ts --compile --outfile ./bin/agent-hooks",
+    "postbuild": "bash scripts/postbuild-sign.sh ./bin/agent-hooks",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
