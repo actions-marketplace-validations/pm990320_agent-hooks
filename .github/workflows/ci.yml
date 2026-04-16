@@ -93,6 +93,18 @@ jobs:
           mkdir -p bin
           bun build ./src/index.ts --compile --target=${{ matrix.target }} --outfile ./bin/${{ matrix.artifact }}
 
+      # Belt-and-suspenders against bun linker-signing regressions.
+      # See release-please.yml's matching step for rationale.
+      - name: Re-sign darwin binary (ad-hoc)
+        if: startsWith(matrix.target, 'bun-darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/${{ matrix.artifact }}
+          codesign --remove-signature "$BIN" || true
+          codesign -fs - --force --deep "$BIN"
+          codesign -dvv "$BIN" 2>&1 | grep -E "flags|Signature" || true
+
       - name: Smoke-test native binary
         if: matrix.can-run
         shell: bash

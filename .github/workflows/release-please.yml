@@ -94,6 +94,24 @@ jobs:
           bun build ./src/index.ts --compile --target=${{ matrix.target }} \
             --outfile ./bin/${{ matrix.artifact }}
 
+      # Belt-and-suspenders against bun linker-signing regressions.
+      # `codesign -fs -` alone fails on bun's --compile output with
+      # "invalid or unsupported format for signature", but the
+      # remove-then-sign sequence succeeds. This guarantees every
+      # darwin asset carries at least an ad-hoc signature before
+      # leaving CI, regardless of what bun's --compile pipeline
+      # emitted. Idempotent: linker-signed output is re-signed to
+      # plain ad-hoc and still runs.
+      - name: Re-sign darwin binary (ad-hoc)
+        if: startsWith(matrix.target, 'bun-darwin')
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/${{ matrix.artifact }}
+          codesign --remove-signature "$BIN" || true
+          codesign -fs - --force --deep "$BIN"
+          codesign -dvv "$BIN" 2>&1 | grep -E "flags|Signature" || true
+
       - name: Smoke-test native binary
         if: matrix.can-run
         shell: bash
