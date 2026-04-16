@@ -16,9 +16,20 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # release-please-action v4 in manifest mode (config-file +
+    # manifest-file) emits PATH-PREFIXED per-package outputs like
+    # `.--release_created` and `.--tag_name`, not the unsuffixed
+    # `release_created` / `tag_name` that the v3 docs describe. The
+    # aggregate boolean `releases_created` is still emitted for any-
+    # package-released. Reading the wrong names silently returns
+    # empty strings, which is what caused v0.1.0 and v0.2.0 to ship
+    # with `promote-release` skipped (release_created != 'true'
+    # evaluated true for an empty string, firing build-preview
+    # instead). Use the aggregate for the boolean and the path-
+    # prefixed name for the tag.
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs['.--tag_name'] }}
       pr: ${{ steps.release.outputs.pr }}
       prs_created: ${{ steps.release.outputs.prs_created }}
     steps:
