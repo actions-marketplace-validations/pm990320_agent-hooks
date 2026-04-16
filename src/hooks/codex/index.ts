@@ -1,11 +1,7 @@
 import path from "node:path";
 import { parseClaudeStyleInput } from "../parsers.ts";
 import { installClaudeStyleSettings } from "../settings-writers.ts";
-import type {
-  AgentHandler,
-  AgentInstallContext,
-  AgentInstallResult,
-} from "../types.ts";
+import type { AgentHandler, AgentInstallContext } from "../types.ts";
 
 /**
  * OpenAI Codex CLI. Uses Claude-Code-style JSON on stdin
@@ -39,6 +35,12 @@ export const codex: AgentHandler = {
     "UserPromptSubmit",
     "Stop",
   ],
+
+  // Verified: Codex treats exit 2 as non-blocking feedback — stderr
+  // is appended to the conversation for the model to self-correct,
+  // matching Claude Code's convention. Other non-zero codes are
+  // user-visible only. Source: developers.openai.com/codex/hooks.
+  stderrFeedbackOnExit2: true,
 
   parseInput: parseClaudeStyleInput,
 
@@ -122,8 +124,8 @@ async function ensureCodexFeatureFlag(
   // Has a `[features]` section already? Insert our flag right after
   // the header line. Matches a line that's exactly `[features]` (with
   // optional trailing whitespace) — does NOT match `[features.sub]`.
-  const featuresMatch = existing.match(/(^|\n)\[features\][ \t]*(\n|$)/);
-  if (featuresMatch && featuresMatch.index !== undefined) {
+  const featuresMatch = /(^|\n)\[features\][ \t]*(\n|$)/.exec(existing);
+  if (featuresMatch?.index !== undefined) {
     const insertPos = featuresMatch.index + featuresMatch[0].length;
     const next =
       existing.slice(0, insertPos) + `${flagLine}\n` + existing.slice(insertPos);

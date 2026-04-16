@@ -25,6 +25,9 @@ export const geminiCli: AgentHandler = {
     "PreCompress",
     "Notification",
   ],
+  // Claude-Code-style settings.json consumer; assumes exit 2
+  // feeds stderr back to the model as non-blocking feedback.
+  stderrFeedbackOnExit2: true,
   parseInput: parseClaudeStyleInput,
   async detect(cwd, homeDir, fs) {
     const project = path.join(cwd, ".gemini");

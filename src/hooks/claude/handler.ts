@@ -23,6 +23,12 @@ export const claude: AgentHandler = {
     "PreCompact",
   ],
 
+  // Verified: Claude Code's hook control-flow treats exit 2 as
+  // non-blocking feedback — stderr is appended to the conversation
+  // so the model can self-correct. Other non-zero codes are
+  // user-visible only. Source: code.claude.com/docs/en/hooks.
+  stderrFeedbackOnExit2: true,
+
   parseInput: parseClaudeStyleInput,
 
   async detect(cwd, homeDir, fs) {

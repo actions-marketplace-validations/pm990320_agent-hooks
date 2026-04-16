@@ -12,6 +12,9 @@ export const cortexCode: AgentHandler = {
   name: "cortex-code",
   displayName: "Cortex Code (Snowflake)",
   hookEvents: ["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"],
+  // Claude-Code-style settings.json consumer; assumes exit 2
+  // feeds stderr back to the model as non-blocking feedback.
+  stderrFeedbackOnExit2: true,
   parseInput: parseClaudeStyleInput,
   async detect(cwd, homeDir, fs) {
     const project = path.join(cwd, ".cortex");

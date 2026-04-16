@@ -15,6 +15,9 @@ export const kimiCodeCli: AgentHandler = {
   name: "kimi-code-cli",
   displayName: "Kimi Code CLI (Moonshot AI)",
   hookEvents: ["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"],
+  // Claude-Code-style settings.json consumer; assumes exit 2
+  // feeds stderr back to the model as non-blocking feedback.
+  stderrFeedbackOnExit2: true,
   parseInput: parseClaudeStyleInput,
   async detect(cwd, homeDir, fs) {
     const user = path.join(homeDir, ".kimi");

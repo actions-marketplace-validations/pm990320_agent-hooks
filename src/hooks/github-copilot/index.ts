@@ -19,6 +19,9 @@ export const githubCopilot: AgentHandler = {
     "Notification",
     "UserPromptSubmit",
   ],
+  // Claude-Code-style settings.json consumer; assumes exit 2
+  // feeds stderr back to the model as non-blocking feedback.
+  stderrFeedbackOnExit2: true,
   parseInput: parseClaudeStyleInput,
   async detect(cwd, _homeDir, fs) {
     const project = path.join(cwd, ".github");

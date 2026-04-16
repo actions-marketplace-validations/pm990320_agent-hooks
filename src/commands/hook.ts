@@ -229,15 +229,21 @@ async function runRegisteredAgent(
     );
     return 2;
   }
-  // Remap any pipeline failure to exit code 2. Claude Code, Codex,
-  // and Gemini CLI all treat exit 2 on a hook as "non-blocking
-  // feedback" — they feed the hook's stderr back to the model as
-  // context so it can self-correct. Exit 1 (or 137, etc.) is treated
-  // as a "non-blocking error" that's shown to the USER only, bypassing
-  // the model entirely, so our ---agent-hooks:next-step--- remediation
-  // blocks never reach the coding agent. Exit 0 passes through
-  // untouched so the happy path stays silent.
-  return result.exitCode === 0 ? 0 : 2;
+  // Remap pipeline failure to exit 2 ONLY for agents that have an
+  // opt-in flag saying "treat exit 2 as stderr-feedback-to-model".
+  // Claude Code and Codex both document this behavior; other agents
+  // in the registry may share Claude's settings.json shape without
+  // sharing its exit-code semantics, and a blanket remap risks
+  // triggering agent-specific behaviors we haven't verified (session
+  // halt, retry loops, etc.). For agents without the flag, pass the
+  // pipeline's exit code through verbatim — that's always at least
+  // as informative as the pre-change behavior. See
+  // AgentHandler.stderrFeedbackOnExit2 for the contract and the
+  // per-agent setting.
+  if (handler.stderrFeedbackOnExit2 && result.exitCode !== 0) {
+    return 2;
+  }
+  return result.exitCode;
 }
 
 export async function runHookCommand(

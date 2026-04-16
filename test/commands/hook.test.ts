@@ -55,6 +55,31 @@ function stubLoadedWithClaude(): LoadedConfig {
   };
 }
 
+// Cline uses a shell-stub install (not Claude's settings.json shape)
+// and its hook runner's exit-code semantics aren't documented as
+// Claude-compatible — it's not on the stderrFeedbackOnExit2 opt-in
+// list. Stub is used by the "passes exit code through verbatim"
+// test to lock in the non-remap path.
+function stubLoadedWithCline(): LoadedConfig {
+  return {
+    config: ConfigSchema.parse({
+      steps: { lint: { run: "echo lint {files}" } },
+      pipelines: { "agent-edit": { steps: ["lint"] } },
+      agents: {
+        cline: {
+          hooks: {
+            PostToolUse: [
+              { matcher: "Edit|Write", pipeline: "agent-edit" },
+            ],
+          },
+        },
+      },
+    }),
+    sourcePath: "/repo/.config/agent-hooks.yml",
+    localPath: null,
+  };
+}
+
 function fakeExec(exit = 0): ExecFn {
   return () => Promise.resolve({ exitCode: exit, durationMs: 1 });
 }
@@ -570,6 +595,35 @@ describe("runHookCommand — claude agent", () => {
         env: {},
       }),
     ).rejects.toThrow(TypeError);
+  });
+});
+
+describe("runHookCommand — exit-code remap opt-in", () => {
+  // Pass-through is the safe default. Only agents on the opt-in list
+  // (stderrFeedbackOnExit2 = true) see the 1→2 remap; every other
+  // agent's pipeline exit code is propagated verbatim, because we
+  // haven't verified that its hook runner treats exit 2 the same way
+  // Claude Code does (some might treat it as "halt session" or
+  // similar). `cline` is a shell-stub agent that uses Claude-style
+  // input parsing but whose hook runner's exit-code semantics aren't
+  // documented — the canonical non-opt-in agent.
+  test("cline (shell stub, no opt-in) passes exit 7 through verbatim", async () => {
+    const code = await runHookCommand("cline", "PostToolUse", {
+      cwd: "/repo",
+      write: () => {},
+      writeErr: () => {},
+      load: () => Promise.resolve(stubLoadedWithCline()),
+      makeGit: () => stubGit(),
+      exec: fakeExec(7),
+      readStdin: fakeStdin(
+        JSON.stringify({
+          tool_name: "Edit",
+          tool_input: { file_paths: ["src/a.ts"] },
+        }),
+      ),
+      env: {},
+    });
+    expect(code).toBe(7);
   });
 });
 
