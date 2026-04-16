@@ -4,6 +4,7 @@ import { augmentCode } from "../../src/hooks/augment-code/index.ts";
 import { claude } from "../../src/hooks/claude/handler.ts";
 import { cline } from "../../src/hooks/cline/index.ts";
 import { codebuddy } from "../../src/hooks/codebuddy/index.ts";
+import { codex } from "../../src/hooks/codex/index.ts";
 import { cortexCode } from "../../src/hooks/cortex-code/index.ts";
 import { droid } from "../../src/hooks/droid/index.ts";
 import { geminiCli } from "../../src/hooks/gemini-cli/index.ts";
@@ -40,6 +41,25 @@ describe("claude handler", () => {
     sampleEvent: "PostToolUse",
     sampleInput: CLAUDE_SAMPLE_JSON,
     expectedToolName: "Edit",
+  });
+});
+
+describe("codex handler", () => {
+  // Codex's PostToolUse only emits for the Bash tool as of early
+  // 2026 (file-editing hooks tracked upstream). Use a Bash payload
+  // so the sample is faithful to what real Codex runs will send.
+  const CODEX_BASH_SAMPLE = JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "ls -la" },
+    tool_response: "total 0",
+    session_id: "test-session",
+  });
+  runAgentSmokeTests(codex, {
+    configKey: "codex",
+    sampleEvent: "PostToolUse",
+    sampleInput: CODEX_BASH_SAMPLE,
+    expectedToolName: "Bash",
   });
 });
 

@@ -3,6 +3,7 @@ import { augmentCode } from "./augment-code/index.ts";
 import { claude } from "./claude/handler.ts";
 import { cline } from "./cline/index.ts";
 import { codebuddy } from "./codebuddy/index.ts";
+import { codex } from "./codex/index.ts";
 import { cortexCode } from "./cortex-code/index.ts";
 import { droid } from "./droid/index.ts";
 import { geminiCli } from "./gemini-cli/index.ts";
@@ -27,6 +28,7 @@ import { windsurf } from "./windsurf/index.ts";
  */
 export const AGENT_HANDLERS: readonly AgentHandler[] = [
   claude,
+  codex,
   geminiCli,
   opencode,
   cline,

@@ -7,8 +7,10 @@ import {
 
 describe("registry", () => {
   test("exposes at least one handler per documented agent", () => {
-    // 21 agents shipped in v0.1 (claude + 20 from the Vercel skills list).
-    expect(AGENT_HANDLERS.length).toBe(21);
+    // 21 agents shipped in v0.1 (claude + 20 from the Vercel skills
+    // list); codex's native hook handler was added afterward, making
+    // 22 total. Bump this count whenever a new handler lands.
+    expect(AGENT_HANDLERS.length).toBe(22);
   });
 
   test("handler names are unique", () => {
