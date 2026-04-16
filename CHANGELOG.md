@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/pm990320/agent-hooks/compare/v0.1.0...v0.2.0) (2026-04-16)
+
+
+### Features
+
+* explicit darwin ad-hoc codesign step in CI matrices ([05ef879](https://github.com/pm990320/agent-hooks/commit/05ef879e2944c93f90a57b9aa3329aaa231c36c9))
+* native Codex CLI hook handler ([d981111](https://github.com/pm990320/agent-hooks/commit/d981111afdee6d524279927e53b05a048ca2d190))
+* remap agent-hook pipeline failures to exit 2 + portable darwin post-build sign ([ec680f0](https://github.com/pm990320/agent-hooks/commit/ec680f0fa4ebfbac56b54085a300a6318841cf38))
+
+
+### Bug Fixes
+
+* build darwin release binaries on macos runners so they're signed ([f4618eb](https://github.com/pm990320/agent-hooks/commit/f4618eb34fd25b4b64895125bf71064bdba7dda7))
+* change-gate evaluator no longer crashes on PR checkouts ([f7b68c6](https://github.com/pm990320/agent-hooks/commit/f7b68c6451bc6a56eb3e29a66b1ba56350df27f9))
+* per-agent opt-in for hook exit-code 2 remap ([d8a0629](https://github.com/pm990320/agent-hooks/commit/d8a062981663f7bc7e0ab058232daa3fbbe24348))
+* pin bun to 1.2.15 so darwin --compile output is linker-signed ([32c5942](https://github.com/pm990320/agent-hooks/commit/32c5942b2a60d4a5b238f92fb5c16743718a88a7))
+* self-heal unsigned darwin binaries via codesign in install.sh ([319e246](https://github.com/pm990320/agent-hooks/commit/319e2466a045ecbbde21bdb96098de265c9c0d73))
+* use matching-refs for exact-tag existence check in rolling-major ([3ab8676](https://github.com/pm990320/agent-hooks/commit/3ab8676dbd6084dc850147a75b81ca566e0eb898))
+
 ## 0.1.0 (2026-04-15)
 
 
