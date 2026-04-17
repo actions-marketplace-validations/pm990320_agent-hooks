@@ -20,7 +20,9 @@ export interface DetectorFs {
  * else is filled in by the merger with agent-hooks schema defaults.
  */
 export interface DetectedStep {
-  readonly run: string;
+  readonly run:
+    | string
+    | { readonly files?: string; readonly project?: string };
   readonly files?: string;
   readonly invocation?: "args" | "project" | "per-file";
   readonly tags?: readonly string[];

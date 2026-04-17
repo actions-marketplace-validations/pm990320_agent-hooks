@@ -1,5 +1,6 @@
 import path from "node:path";
 import type {
+  DetectedStep,
   Detector,
   DetectorContext,
   DetectorFragment,
@@ -61,7 +62,79 @@ function runnerFor(
   }
 }
 
-function nodeFragment(manager: NodePackageManager): DetectorFragment {
+/**
+ * Detect the test framework from package.json devDependencies/dependencies.
+ * Returns the framework name for which we have an affected-tests recipe,
+ * or null for a generic fallback.
+ */
+type TestFramework = "vitest" | "jest" | null;
+
+function detectTestFramework(
+  pkg: Record<string, unknown> | null,
+): TestFramework {
+  if (!pkg) return null;
+  const deps = {
+    ...(typeof pkg.devDependencies === "object" && pkg.devDependencies
+      ? (pkg.devDependencies as Record<string, unknown>)
+      : {}),
+    ...(typeof pkg.dependencies === "object" && pkg.dependencies
+      ? (pkg.dependencies as Record<string, unknown>)
+      : {}),
+  };
+  if ("vitest" in deps) return "vitest";
+  if ("jest" in deps || "@jest/globals" in deps) return "jest";
+  return null;
+}
+
+/**
+ * Build the test step based on the detected test framework. Frameworks
+ * that support affected-only testing (vitest, jest) get the two-form
+ * run: syntax so agent-edit runs only related tests while CI runs the
+ * full suite. Others fall back to a simple project-scoped run.
+ */
+function testStepFor(
+  manager: NodePackageManager,
+  r: { run: string; exec: string },
+  framework: TestFramework,
+): DetectedStep {
+  const bunExec = manager === "bun" ? "bunx" : r.exec;
+  if (framework === "vitest") {
+    return {
+      run: {
+        files: `${bunExec} vitest related {files}`,
+        project: `${bunExec} vitest run`,
+      },
+      files: "**/*.{ts,tsx,js,jsx}",
+      tags: ["fast"],
+      description: "Run affected tests via vitest (full suite on CI)",
+    };
+  }
+  if (framework === "jest") {
+    return {
+      run: {
+        files: `${bunExec} jest --findRelatedTests {files}`,
+        project: `${bunExec} jest`,
+      },
+      files: "**/*.{ts,tsx,js,jsx}",
+      tags: ["fast"],
+      description: "Run affected tests via jest (full suite on CI)",
+    };
+  }
+  return {
+    run:
+      manager === "bun"
+        ? "bun test {files}"
+        : `${r.run} test`,
+    files: "**/*.{ts,tsx,js,jsx}",
+    tags: ["fast"],
+    description: `Run tests via ${manager}`,
+  };
+}
+
+function nodeFragment(
+  manager: NodePackageManager,
+  testFramework: TestFramework = null,
+): DetectorFragment {
   const r = runnerFor(manager);
   return {
     steps: {
@@ -76,15 +149,7 @@ function nodeFragment(manager: NodePackageManager): DetectorFragment {
         tags: ["fast"],
         description: `TypeScript project check via ${manager}`,
       },
-      test: {
-        run:
-          manager === "bun"
-            ? `bun test {files}`
-            : `${r.run} test`,
-        files: "**/*.{ts,tsx,js,jsx}",
-        tags: ["fast"],
-        description: `Run tests via ${manager}`,
-      },
+      test: testStepFor(manager, r, testFramework),
       build: {
         run: `${r.run} build`,
         invocation: "project",
@@ -139,7 +204,9 @@ function makeNodeDetector(
     async template(ctx) {
       const manager = await detectManager(ctx);
       if (manager !== name) return {};
-      return nodeFragment(manager);
+      const pkg = await readPackageJson(ctx);
+      const testFramework = detectTestFramework(pkg);
+      return nodeFragment(manager, testFramework);
     },
   };
 }

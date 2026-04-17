@@ -104,7 +104,7 @@ invocations. Use the object form:
 steps:
   test:
     run:
-      files: vitest run --related {files}
+      files: vitest related {files}
       project: vitest run
     files: "**/*.{ts,tsx}"
 ```
@@ -119,6 +119,114 @@ Which variant runs depends on the file list:
 | String form | Treated as `files`, also used as `project` if no other variant |
 
 When `project` runs, `{files}` is not substituted.
+
+## Affected-only testing
+
+Running the full test suite on every agent edit is slow and noisy.
+Most test frameworks can filter to only the tests that cover a
+given source file. Use the two-form `run:` syntax above to run
+affected tests during agent-edit / pre-commit hooks and the full
+suite in CI.
+
+**This is the single highest-impact optimization you can make for
+agent feedback speed.** A 90-second full vitest suite becomes a
+2-second `vitest related src/auth.ts` call when Claude edits one
+file.
+
+### Framework recipes
+
+**Vitest** (recommended for Bun / Node projects):
+
+```yaml
+test:
+  run:
+    files: vitest related {files}
+    project: vitest run
+  files: "**/*.{ts,tsx}"
+```
+
+`vitest related` traces the import graph and runs only test files
+that transitively import the given source files.
+
+**Jest:**
+
+```yaml
+test:
+  run:
+    files: jest --findRelatedTests {files}
+    project: jest
+  files: "**/*.{ts,tsx,js,jsx}"
+```
+
+`--findRelatedTests` is Jest's equivalent — it uses the module
+resolver to find test files that depend on the changed sources.
+
+**Bun test** (no built-in related-test flag):
+
+```yaml
+test:
+  run: bun test {files}
+  files: "**/*.test.{ts,tsx}"
+```
+
+Bun's test runner doesn't have a `--related` mode. Passing test
+file paths directly works when the agent edits a test file, but
+won't catch source-file changes that break a test elsewhere. If
+your project uses Bun as the runtime but vitest as the test runner,
+prefer the vitest recipe above.
+
+**pytest** (Python):
+
+```yaml
+test:
+  run:
+    files: pytest --testmon {files}
+    project: pytest
+  files: "**/*.py"
+```
+
+`pytest-testmon` (`pip install pytest-testmon`) tracks which tests
+cover which source files and re-runs only affected tests. Without
+testmon, pytest has no built-in related-file mode — falling back
+to `pytest {files}` only works for test files, not source files.
+
+**Go:**
+
+```yaml
+test:
+  run:
+    files: go test {files}
+    project: go test ./...
+  files: "**/*.go"
+```
+
+Go's test runner works per-package. `{files}` here would be
+package paths like `./pkg/auth`. For finer granularity, use
+`gotestfmt` or `gotestsum` with package-level filtering.
+
+**Cargo (Rust):**
+
+```yaml
+test:
+  run: cargo test
+  invocation: project
+```
+
+Cargo doesn't have a per-file related-test mode. Its incremental
+compilation makes full `cargo test` fast enough for most projects.
+
+### How it works with agent hooks
+
+When a coding agent edits a file, the `PostToolUse` hook fires
+with the edited file paths in the payload. agent-hooks passes
+those as the pipeline's file list. Steps with `files:` globs filter
+to matching files, and the `run.files` variant is invoked with
+`{files}` replaced by the actual paths. Steps without a `files:`
+glob or with `invocation: project` run once regardless.
+
+The `when-changed` gate also matches against these payload files,
+so a `license-audit` step gated on `package.json` only fires when
+the agent actually edited `package.json` — not on every edit.
 
 ## Template variables
 

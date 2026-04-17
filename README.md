@@ -100,8 +100,11 @@ steps:
     run: tsc --noEmit
     invocation: project
   test:
+    # Two-form run: affected-only tests when an agent edits a file,
+    # full suite in CI. This is the single biggest speed win for
+    # agent feedback — a 90s full suite becomes a 2s related-test run.
     run:
-      files: vitest run --related {files}
+      files: vitest related {files}
       project: vitest run
     files: "**/*.{ts,tsx}"
 
@@ -114,8 +117,9 @@ pipelines:
     exclude-tags: [slow]
 ```
 
-See [docs/configuration.md](./docs/configuration.md) for the full
-reference.
+See [docs/pipelines-and-steps.md](./docs/pipelines-and-steps.md)
+for the full `run:` syntax and recipes for Jest, pytest, Go, and
+other test frameworks.
 
 ## The three contexts
 
