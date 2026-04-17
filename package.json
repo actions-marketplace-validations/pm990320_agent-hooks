@@ -34,7 +34,7 @@
     "generate:schema": "bun run scripts/generate-schema.ts",
     "prebuild": "bun run generate:schema",
     "build": "bun build ./src/index.ts --compile --outfile ./bin/agent-hooks",
-    "build:npm": "bun build ./src/index.ts --target=node --outdir ./dist --minify && sed -i '' '1s|#!/usr/bin/env bun|#!/usr/bin/env node|' dist/index.js",
+    "build:npm": "bun build ./src/index.ts --target=node --outdir ./dist --minify && sed -i '1s|#!/usr/bin/env bun|#!/usr/bin/env node|' dist/index.js",
     "postbuild": "bash scripts/postbuild-sign.sh ./bin/agent-hooks",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
