@@ -188,8 +188,14 @@ async function runOneStep(
 ): Promise<StepOutcome> {
   // Change-gate check: before firing onStepStart, decide whether this
   // step should run at all. `forceGates` bypasses.
-  if (!options.forceGates && options.git && entry.step["when-changed"]) {
-    const decision = await evaluateGate(entry.step, options.git);
+  if (!options.forceGates && entry.step["when-changed"]) {
+    const decision = await evaluateGate({
+      stepName: entry.name,
+      step: entry.step,
+      git: options.git!,
+      cwd: options.cwd,
+      inputFiles: options.files,
+    });
     if (decision && !decision.shouldRun) {
       const outcome: StepOutcome = {
         name: entry.name,

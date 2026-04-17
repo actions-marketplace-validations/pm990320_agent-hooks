@@ -75,6 +75,19 @@ export interface EvaluateGateOptions {
   readonly git: GitRunner;
   /** Absolute path to the repo root — used by the last-run cache. */
   readonly cwd: string;
+  /**
+   * The pipeline's resolved input file list — from the hook payload,
+   * `--files`, `--staged`, `--all`, etc. When provided, the gate
+   * checks whether any of these files match the `when-changed.paths`
+   * patterns directly, WITHOUT calling git. This is the correct
+   * behavior for agent hooks (the payload IS the authoritative list
+   * of what changed) and for every other invocation mode (the scope
+   * resolution already determined what files are "in play").
+   *
+   * Falls back to git-based detection only when this is undefined
+   * (legacy callers that haven't been updated to pass files).
+   */
+  readonly inputFiles?: readonly string[];
   /** Filesystem adapter for the last-run cache. Only needed for `since: last-run`. */
   readonly cacheFs?: GateCacheFs;
   /** How to read a watch-path file's content when hashing for last-run. */
@@ -126,6 +139,24 @@ export async function evaluateGate(
 
   const watch = normalizePaths(gate.paths);
   const matchers = watch.map((glob) => picomatch(glob, { dot: true }));
+
+  // When input files are provided (hook payload, --files, --staged,
+  // --all), match against those directly. No git call needed — the
+  // caller already resolved what's "in scope" and the gate just
+  // filters on it. This is critical for agent hooks where the payload
+  // IS the authoritative list of what the agent just changed.
+  if (options.inputFiles !== undefined) {
+    const hit = options.inputFiles.some((file) =>
+      matchers.some((match) => match(file)),
+    );
+    if (hit) {
+      return { shouldRun: true, reason: "matched input files" };
+    }
+    return {
+      shouldRun: false,
+      reason: `no input files matched ${watch.join(", ")}`,
+    };
+  }
 
   if (gate.since === "last-run") {
     const fs = options.cacheFs;

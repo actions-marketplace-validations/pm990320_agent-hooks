@@ -398,15 +398,18 @@ describe("runPipeline — change gates", () => {
     expect(calls.some((c) => c.command.includes("audit"))).toBe(false);
   });
 
-  test("runs the gated step when a watched path is in the diff", async () => {
+  test("runs the gated step when a watched path is in the input files", async () => {
     const { calls, exec } = recordExec();
+    // The pipeline's `files` list is the authoritative set of "what's
+    // in scope" — from the hook payload, --files, --staged, or --all.
+    // The gate matches against these, NOT git state.
     const result = await runPipeline(
       {
         pipelineName: "ci",
         config: gatedConfig(),
-        files: [],
+        files: ["package.json"],
         cwd: "/repo",
-        git: gitStub(["package.json"], []),
+        git: gitStub([], []),
       },
       exec,
     );
@@ -432,8 +435,10 @@ describe("runPipeline — change gates", () => {
     expect(gated?.kind).toBe("ran");
   });
 
-  test("omitting the git runner leaves gates unevaluated (steps run)", async () => {
+  test("empty input files + gate → step is skipped (nothing in scope matches)", async () => {
     const { exec } = recordExec();
+    // Empty files = nothing was edited/staged/scoped. The gate
+    // correctly skips because no file matches the watch pattern.
     const result = await runPipeline(
       {
         pipelineName: "ci",
@@ -444,7 +449,7 @@ describe("runPipeline — change gates", () => {
       exec,
     );
     const gated = result.steps.find((o) => o.name === "license-audit");
-    expect(gated?.kind).toBe("ran");
+    expect(gated?.kind).toBe("skipped-by-gate");
   });
 });
 

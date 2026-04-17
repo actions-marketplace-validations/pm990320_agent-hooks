@@ -40,6 +40,57 @@ describe("evaluateGate", () => {
     expect(result).toBeNull();
   });
 
+  test("uses inputFiles (hook payload) when provided, ignoring git", async () => {
+    const s = step({
+      "when-changed": { paths: "package.json", since: "head" },
+    });
+    // Git says nothing changed, but the hook payload says package.json
+    // was just edited. inputFiles wins — no git call.
+    const gitThatThrows = {
+      staged: () => { throw new Error("should not be called"); },
+      changed: () => { throw new Error("should not be called"); },
+      all: () => { throw new Error("should not be called"); },
+    };
+    const result = await evaluateGate({
+      stepName: "license-audit",
+      step: s,
+      git: gitThatThrows,
+      cwd: "/repo",
+      inputFiles: ["package.json"],
+    });
+    expect(result?.shouldRun).toBe(true);
+    expect(result?.reason).toContain("input files");
+  });
+
+  test("inputFiles that don't match the gate pattern → skip", async () => {
+    const s = step({
+      "when-changed": { paths: ["package.json", "bun.lock"] },
+    });
+    const result = await evaluateGate({
+      stepName: "license-audit",
+      step: s,
+      git: stubGit([], []),
+      cwd: "/repo",
+      inputFiles: ["src/app.ts", "src/index.ts"],
+    });
+    expect(result?.shouldRun).toBe(false);
+    expect(result?.reason).toContain("no input files matched");
+  });
+
+  test("empty inputFiles → skip (agent edited nothing matching)", async () => {
+    const s = step({
+      "when-changed": { paths: "package.json" },
+    });
+    const result = await evaluateGate({
+      stepName: "license-audit",
+      step: s,
+      git: stubGit([], []),
+      cwd: "/repo",
+      inputFiles: [],
+    });
+    expect(result?.shouldRun).toBe(false);
+  });
+
   test("returns shouldRun=true when a staged file matches the watch glob", async () => {
     const s = step({
       "when-changed": { paths: "package.json", since: "head" },
