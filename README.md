@@ -1,14 +1,10 @@
 # agent-hooks
 
 > One command for CI, pre-commit hooks, and agent feedback loops.
-> Ships as a single binary. No second tool to configure.
 
 [![CI](https://github.com/pm990320/agent-hooks/actions/workflows/ci.yml/badge.svg)](https://github.com/pm990320/agent-hooks/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@pm990320/agent-hooks)](https://www.npmjs.com/package/@pm990320/agent-hooks)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-
-> **Status:** early development. The plan and docs describe the
-> intended design; the implementation lives in `src/` and is being
-> built out milestone by milestone. See [PLAN.md](./PLAN.md).
 
 ## What it does
 
@@ -21,44 +17,61 @@
 
 ## Install
 
+**npm** (Node 18+ or Bun):
+
+```bash
+# global
+npm install -g @pm990320/agent-hooks
+
+# or as a dev dependency
+npm install -D @pm990320/agent-hooks
+```
+
+**Bun:**
+
+```bash
+# global
+bun add -g @pm990320/agent-hooks
+
+# or as a dev dependency
+bun add -d @pm990320/agent-hooks
+```
+
+**Standalone binary** (no runtime required):
+
 ```bash
 curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh
 ```
 
-That's it. Single standalone binary, no Node/Bun required. Lands at
-`~/.local/bin/agent-hooks`.
+Downloads a single native binary for your OS + arch. No Node or Bun
+needed.
 
 <details>
-<summary>Other install options</summary>
+<summary>More install options</summary>
 
 **Pin a version:**
 
 ```bash
-curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh -s -- --version v0.2.0
 ```
 
-**Install somewhere other than `~/.local/bin`:**
+**Install to a specific directory:**
 
 ```bash
 curl -fsSL https://github.com/pm990320/agent-hooks/releases/latest/download/install.sh | sh -s -- --dir /usr/local/bin
 ```
 
-**GitHub Action (CI only, no local install needed):**
+**GitHub Action (CI only):**
 
 ```yaml
-- uses: pm990320/agent-hooks@v1
+- uses: pm990320/agent-hooks@v0
 - run: agent-hooks ci
 ```
 
 **Manual download:** grab the binary for your OS + arch from the
-[latest release](https://github.com/pm990320/agent-hooks/releases/latest)
-and put it on your `PATH`.
+[latest release](https://github.com/pm990320/agent-hooks/releases/latest).
 
 </details>
-
-agent-hooks is distributed as a single standalone binary per
-platform. It is not published to npm — one artifact, one code path,
-no runtime prereqs.
 
 ## Quick start
 
@@ -78,7 +91,6 @@ cargo / go / deno / terraform / …), writes a starter
 
 ```yaml
 # yaml-language-server: $schema=https://raw.githubusercontent.com/pm990320/agent-hooks/main/schema.json
-$schema: https://raw.githubusercontent.com/pm990320/agent-hooks/main/schema.json
 
 steps:
   lint:
@@ -125,20 +137,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pm990320/agent-hooks@v1
+      - uses: pm990320/agent-hooks@v0
       - run: agent-hooks ci
 ```
 
 ## Coding agent integration
 
-**Claude Code**: `agent-hooks agent install claude` writes
-`.claude/settings.json` so its hooks call `agent-hooks hook claude
-<HookName>`. The pipeline that runs for each hook lives in
-`.config/agent-hooks.yml`, not in Claude Code's settings.
+agent-hooks ships native hook handlers for 22 coding agents
+including Claude Code, Codex, Gemini CLI, GitHub Copilot, Windsurf,
+Cline, and more.
 
-**Codex** / **Cursor**: same shape, different agent name.
+```bash
+agent-hooks agent install claude    # writes .claude/settings.json
+agent-hooks agent install codex     # writes .codex/hooks.json
+agent-hooks agent install generic   # prints a shell snippet
+```
 
-**Custom agent**: `agent-hooks agent install generic`.
+The pipeline that runs for each hook lives in
+`.config/agent-hooks.yml`, not in the agent's settings.
 
 See [docs/agent-integration.md](./docs/agent-integration.md).
 
@@ -155,18 +171,12 @@ these are the commands you need:
 | To see available steps | `agent-hooks list` |
 | To check your environment | `agent-hooks doctor` |
 
-**Passing file paths**: space-separated, quoted if they contain
-spaces.
+**Skipping**: `[skip agent-hooks]` or `[skip ci]` in the commit
+message, or `--skip <step>` on the CLI.
 
-**Skipping**: failing on infra (missing dep, etc.) → already
-warn-skipped. Deliberate skip → `[skip agent-hooks]` in the commit
-message or `--skip <step>`.
-
-**Beads**: after `bd sync`, run `agent-hooks beads post-sync` to
-create the follow-up commit automatically.
-
-**Config location**: `.config/agent-hooks.yml`. JSON-schema
-validated — read it to see what steps and pipelines are defined.
+**Config location**: `.config/agent-hooks.yml` — JSON-schema
+validated. Run `agent-hooks list` to see what steps and pipelines
+are defined.
 
 ## Documentation
 
@@ -175,11 +185,10 @@ validated — read it to see what steps and pipelines are defined.
 - [CLI reference](./docs/cli.md)
 - [Pipelines and steps](./docs/pipelines-and-steps.md)
 - [Stack detection](./docs/stack-detection.md)
-- [Testing (area maps, tags, E2E)](./docs/testing.md)
 - [Agent integration](./docs/agent-integration.md)
-- [Playwright-Checkpoint](./docs/playwright-checkpoint.md)
+- [Release process](./docs/release-process.md)
 - [GitHub Actions](./docs/github-actions.md)
-- [Beads](./docs/beads.md)
+- [Testing](./docs/testing.md)
 - [Troubleshooting](./docs/troubleshooting.md)
 - [Contributing](./docs/contributing.md)
 
