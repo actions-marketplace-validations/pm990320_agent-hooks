@@ -10,7 +10,7 @@
  * distribution without touching every consumer. The same code also
  * works under Bun (child_process is Bun-compatible).
  */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { text } from "node:stream/consumers";
 
@@ -34,8 +34,8 @@ export interface SpawnHandle {
 }
 
 export function spawnProcess(options: SpawnOptions): SpawnHandle {
-  const [cmd, ...args] = options.cmd;
-  const child = spawn(cmd, args, {
+  const [cmd = "sh", ...args] = options.cmd;
+  const child: ChildProcess = spawn(cmd, args, {
     cwd: options.cwd,
     env: options.env,
     stdio: [
@@ -46,17 +46,25 @@ export function spawnProcess(options: SpawnOptions): SpawnHandle {
   });
 
   const exited = new Promise<number>((resolve, reject) => {
-    child.on("exit", (code) => resolve(code ?? 1));
-    child.on("error", reject);
+    child.on("exit", (code: number | null) => {
+      resolve(code ?? 1);
+    });
+    child.on("error", (err: Error) => {
+      reject(err);
+    });
   });
 
   return {
     exited,
-    stdout: child.stdout,
-    stderr: child.stderr,
-    stdin: child.stdin,
-    kill: (signal) =>
-      child.kill(signal as NodeJS.Signals | undefined),
+    stdout: child.stdout ?? null,
+    stderr: child.stderr ?? null,
+    stdin: child.stdin ?? null,
+    kill(signal?: NodeJS.Signals | number): boolean {
+      if (typeof signal === "number") {
+        return child.kill(signal);
+      }
+      return child.kill(signal);
+    },
     pid: child.pid,
   };
 }
@@ -70,9 +78,9 @@ export async function streamToText(
   stream: Readable | ReadableStream | null,
 ): Promise<string> {
   if (!stream) return "";
-  // Node Readable — use stream/consumers.text()
-  if ("on" in stream && typeof (stream as Readable).on === "function") {
-    return text(stream as Readable);
+  // Node Readable — has .on() method
+  if ("on" in stream && typeof stream.on === "function") {
+    return text(stream);
   }
   // Web ReadableStream — Bun path
   return new Response(stream as ReadableStream).text();
