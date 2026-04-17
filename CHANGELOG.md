@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/pm990320/agent-hooks/compare/v0.3.1...v0.3.2) (2026-04-17)
+
+
+### Bug Fixes
+
+* upgrade npm to latest in publish-npm for OIDC trusted publisher support ([481b4c8](https://github.com/pm990320/agent-hooks/commit/481b4c8c42a2162fdfb7c2ec6f03a78f9a542401))
+
 ## [0.3.1](https://github.com/pm990320/agent-hooks/compare/v0.3.0...v0.3.1) (2026-04-17)
 
 
