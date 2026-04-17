@@ -48,12 +48,19 @@ export interface LoaderFs {
   read(filePath: string): Promise<string>;
 }
 
+const nodeFs = await import("node:fs/promises");
+
 const defaultFs: LoaderFs = {
   async exists(filePath) {
-    return Bun.file(filePath).exists();
+    try {
+      await nodeFs.access(filePath);
+      return true;
+    } catch {
+      return false;
+    }
   },
   async read(filePath) {
-    return Bun.file(filePath).text();
+    return nodeFs.readFile(filePath, "utf8");
   },
 };
 

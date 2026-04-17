@@ -294,10 +294,19 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.15"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build Node-compatible JS bundle
+        run: bun run build:npm
 
       - name: Publish to npm
         env:

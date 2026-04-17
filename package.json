@@ -22,11 +22,10 @@
   "author": "Patrick Menlove",
   "type": "module",
   "bin": {
-    "agent-hooks": "./scripts/npm-bin.js"
+    "agent-hooks": "./dist/index.js"
   },
   "files": [
-    "scripts/npm-bin.js",
-    "scripts/npm-postinstall.js",
+    "dist",
     "schema.json",
     "README.md",
     "LICENSE"
@@ -35,8 +34,8 @@
     "generate:schema": "bun run scripts/generate-schema.ts",
     "prebuild": "bun run generate:schema",
     "build": "bun build ./src/index.ts --compile --outfile ./bin/agent-hooks",
+    "build:npm": "bun build ./src/index.ts --target=node --outdir ./dist --minify && sed -i '' '1s|#!/usr/bin/env bun|#!/usr/bin/env node|' dist/index.js",
     "postbuild": "bash scripts/postbuild-sign.sh ./bin/agent-hooks",
-    "postinstall": "node scripts/npm-postinstall.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",

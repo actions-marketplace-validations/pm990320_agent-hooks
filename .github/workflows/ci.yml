@@ -127,39 +127,36 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Node-runtime integration test for the npm wrapper package. Exercises
-  # scripts/npm-bin.js end-to-end: pack, install into a clean consumer
-  # dir under a real Node runtime (not Bun), invoke via the symlink
-  # npm places in .bin/, assert exit code and version string.
-  #
-  # Postinstall's download path is skipped here (AGENT_HOOKS_SKIP_POSTINSTALL=1)
-  # because the current package.json version typically doesn't yet
-  # correspond to a published GitHub release — every main push bumps
-  # its way toward a future release. The wrapper is still fully
-  # exercised: we pre-seed bin/agent-hooks with the just-built binary
-  # artifact from binary-matrix and the wrapper resolves it like it
-  # would a download.
-  npm-wrapper-smoke:
-    name: npm wrapper smoke test (Node)
-    needs: binary-matrix
+  # Node-runtime integration test. The npm package ships compiled JS
+  # (bun build --target=node), not a native binary. This job verifies
+  # the JS bundle runs end-to-end under a real Node runtime: pack, install
+  # into a consumer dir, invoke --version / --help / list via the symlink.
+  npm-node-smoke:
+    name: npm smoke test (Node)
+    needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          name: agent-hooks-linux-x64
-          path: /tmp/ah-artifact
+          bun-version: "1.2.15"
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build Node-compatible JS bundle
+        run: bun run build:npm
 
       - name: Pack
         run: |
           set -euo pipefail
           npm pack
           mv agent-hooks-*.tgz /tmp/agent-hooks.tgz
+          echo "=== tarball contents ==="
           tar tzf /tmp/agent-hooks.tgz | sort
 
       - name: Install in clean consumer dir under Node runtime
@@ -168,58 +165,19 @@ jobs:
           mkdir /tmp/consumer
           cd /tmp/consumer
           printf '{"name":"consumer","version":"1.0.0","private":true}\n' > package.json
-          # Postinstall download is skipped; we pre-seed with the binary
-          # built one job up so the wrapper resolves to a real
-          # executable and we test the Node→native spawn path.
-          AGENT_HOOKS_SKIP_POSTINSTALL=1 npm install /tmp/agent-hooks.tgz
-          mkdir -p node_modules/agent-hooks/bin
-          cp /tmp/ah-artifact/agent-hooks-linux-x64 node_modules/agent-hooks/bin/agent-hooks
-          chmod +x node_modules/agent-hooks/bin/agent-hooks
+          npm install /tmp/agent-hooks.tgz
 
-      - name: Exec via the wrapper
+      - name: --version under Node
         run: |
           set -euo pipefail
           cd /tmp/consumer
-          echo "=== --version ==="
-          ./node_modules/.bin/agent-hooks --version
-          echo "=== --help (truncated) ==="
-          ./node_modules/.bin/agent-hooks --help | head -5
-          echo "=== version stamp matches package.json ==="
+          version=$(./node_modules/.bin/agent-hooks --version)
           expected=$(jq -r .version "$GITHUB_WORKSPACE/package.json")
-          actual=$(./node_modules/.bin/agent-hooks --version)
-          if [ "$expected" != "$actual" ]; then
-            echo "::error::wrapper produced '$actual' but package.json declares '$expected'"
-            exit 1
-          fi
-          echo "ok: $actual"
+          echo "got: $version, expected: $expected"
+          [ "$version" = "$expected" ]
 
-      - name: Exec respects AGENT_HOOKS_BINARY override
-        run: |
-          set -euo pipefail
-          chmod +x /tmp/ah-artifact/agent-hooks-linux-x64
-          AGENT_HOOKS_BINARY=/tmp/ah-artifact/agent-hooks-linux-x64 \
-            /tmp/consumer/node_modules/.bin/agent-hooks --version
+      - name: --help under Node
+        run: /tmp/consumer/node_modules/.bin/agent-hooks --help | head -10
 
-      - name: Exec handles missing binary gracefully
-        run: |
-          set -euo pipefail
-          # Simulate --ignore-scripts: remove the downloaded binary and
-          # assert the wrapper exits 127 with a useful error message
-          # rather than a cryptic spawn failure.
-          rm /tmp/consumer/node_modules/agent-hooks/bin/agent-hooks
-          cd /tmp/consumer
-          set +e
-          output=$(./node_modules/.bin/agent-hooks --version 2>&1)
-          code=$?
-          set -e
-          if [ "$code" -ne 127 ]; then
-            echo "::error::expected exit 127 when binary is missing, got $code"
-            echo "$output"
-            exit 1
-          fi
-          echo "$output" | grep -qi "native binary not found" || {
-            echo "::error::error message didn't match expected text"
-            echo "$output"
-            exit 1
-          }
-          echo "ok: missing-binary exit 127 with clear error"
+      - name: schema subcommand under Node
+        run: /tmp/consumer/node_modules/.bin/agent-hooks schema | head -5

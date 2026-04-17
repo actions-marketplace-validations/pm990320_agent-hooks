@@ -35,6 +35,7 @@ import {
 import { runPipeline } from "../runners/pipeline.ts";
 import { registerChild } from "../runners/process-registry.ts";
 import { resolveSkipDirectives } from "../runners/skip-directives.ts";
+import { spawnProcess, streamToText } from "../runners/spawn.ts";
 import type { ExecFn } from "../runners/step.ts";
 import type { StepOutcome } from "../runners/pipeline.ts";
 import { writeFileSync } from "node:fs";
@@ -470,7 +471,7 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
       // harnesses that need to capture output should set output:
       // 'buffered' explicitly (or rely on the pipeline runner doing
       // it for parallel pipelines).
-      const proc = Bun.spawn({
+      const proc = spawnProcess({
         cmd: ["sh", "-c", command],
         cwd,
         env,
@@ -481,8 +482,7 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
       const dispose = registerChild(proc);
       try {
         if (stdin !== undefined && proc.stdin) {
-          await proc.stdin.write(stdin);
-          await proc.stdin.end();
+          proc.stdin.end(stdin);
         }
         const { exitCode, timedOut } = await runWithTimeout(proc);
         return {
@@ -498,7 +498,7 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
     // buffered: capture stdout/stderr in memory so two parallel
     // siblings don't interleave on the parent's FDs, then flush
     // atomically on completion.
-    const proc = Bun.spawn({
+    const proc = spawnProcess({
       cmd: ["sh", "-c", command],
       cwd,
       env,
@@ -509,8 +509,7 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
     const dispose = registerChild(proc);
     try {
       if (stdin !== undefined && proc.stdin) {
-        await proc.stdin.write(stdin);
-        await proc.stdin.end();
+        proc.stdin.end(stdin);
       }
       // Start the stream drains eagerly so any output already buffered
       // is captured, but don't let them block the return on a timeout:
@@ -520,8 +519,8 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
       // naturally exits. When runWithTimeout reports timedOut, give
       // the reads a short grace window to flush what they already have
       // and then give up on the rest.
-      const stdoutPromise = new Response(proc.stdout).text();
-      const stderrPromise = new Response(proc.stderr).text();
+      const stdoutPromise = streamToText(proc.stdout);
+      const stderrPromise = streamToText(proc.stderr);
       const { exitCode, timedOut } = await runWithTimeout(proc);
       const graceMs = 500;
       const raceGrace = (p: Promise<string>): Promise<string> =>

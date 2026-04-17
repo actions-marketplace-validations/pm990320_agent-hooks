@@ -24,6 +24,7 @@
 import nodeFs from "node:fs/promises";
 import nodePath from "node:path";
 import { registerChild } from "./process-registry.ts";
+import { spawnProcess, streamToText } from "./spawn.ts";
 
 export type EnvSourceKind =
   | "process"
@@ -445,7 +446,7 @@ const defaultEnvFs: EnvFs = {
 const defaultEnvCommandRunner: EnvCommandRunner = async (command, cwd) => {
   let proc;
   try {
-    proc = Bun.spawn({
+    proc = spawnProcess({
       cmd: [...command],
       cwd,
       stdout: "pipe",
@@ -457,11 +458,17 @@ const defaultEnvCommandRunner: EnvCommandRunner = async (command, cwd) => {
   const dispose = registerChild(proc);
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
+      streamToText(proc.stdout),
+      streamToText(proc.stderr),
       proc.exited,
     ]);
     return { stdout, stderr, exitCode };
+  } catch {
+    // child_process.spawn emits 'error' asynchronously for bad
+    // commands (unlike Bun.spawn which throws synchronously). The
+    // error propagates through proc.exited's rejection. Treat it
+    // the same as a synchronous spawn failure.
+    return { stdout: "", stderr: "spawn failed", exitCode: 127 };
   } finally {
     dispose();
   }

@@ -1,6 +1,7 @@
 import nodePath from "node:path";
 import picomatch from "picomatch";
 import { registerChild } from "./process-registry.ts";
+import { spawnProcess, streamToText } from "./spawn.ts";
 
 /**
  * Scope kinds supported by every file-consuming command.
@@ -213,7 +214,7 @@ export function wrapSpawnError(
 export const defaultSpawner: Spawner = async (command, cwd) => {
   let proc;
   try {
-    proc = Bun.spawn({
+    proc = spawnProcess({
       cmd: [...command],
       cwd,
       stdout: "pipe",
@@ -225,11 +226,11 @@ export const defaultSpawner: Spawner = async (command, cwd) => {
   const dispose = registerChild(proc);
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
+      streamToText(proc.stdout),
+      streamToText(proc.stderr),
       proc.exited,
     ]);
-    return { stdout, stderr, exitCode, signal: proc.signalCode };
+    return { stdout, stderr, exitCode };
   } finally {
     dispose();
   }
