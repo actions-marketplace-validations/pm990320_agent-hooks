@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/pm990320/agent-hooks/compare/v0.3.0...v0.3.1) (2026-04-17)
+
+
+### Bug Fixes
+
+* resilient release-please output names + rebuild fallback when preview is missing ([626ddaa](https://github.com/pm990320/agent-hooks/commit/626ddaa073edf9c75aa8fce3d473ec1a301b130e))
+* use git tag -f for rolling major tag (REST API prefix-matches and 404s on short tags) ([3bd6b98](https://github.com/pm990320/agent-hooks/commit/3bd6b98d31eb589787fd0bbf6b420e3de1cebab3))
+
 ## [0.3.0](https://github.com/pm990320/agent-hooks/compare/v0.2.0...v0.3.0) (2026-04-17)
 
 
