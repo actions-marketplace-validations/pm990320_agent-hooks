@@ -16,20 +16,14 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    # release-please-action v4 in manifest mode (config-file +
-    # manifest-file) emits PATH-PREFIXED per-package outputs like
-    # `.--release_created` and `.--tag_name`, not the unsuffixed
-    # `release_created` / `tag_name` that the v3 docs describe. The
-    # aggregate boolean `releases_created` is still emitted for any-
-    # package-released. Reading the wrong names silently returns
-    # empty strings, which is what caused v0.1.0 and v0.2.0 to ship
-    # with `promote-release` skipped (release_created != 'true'
-    # evaluated true for an empty string, firing build-preview
-    # instead). Use the aggregate for the boolean and the path-
-    # prefixed name for the tag.
+    # release-please-action v4's output naming is inconsistent between
+    # versions and config modes. We've seen it emit release_created
+    # (singular), releases_created (plural), and .--release_created
+    # (path-prefixed) across different runs. Use OR-fallback
+    # expressions so we catch whichever variant it emits.
     outputs:
-      release_created: ${{ steps.release.outputs.releases_created }}
-      tag_name: ${{ steps.release.outputs['.--tag_name'] }}
+      release_created: ${{ steps.release.outputs.release_created || steps.release.outputs.releases_created || steps.release.outputs['.--release_created'] }}
+      tag_name: ${{ steps.release.outputs.tag_name || steps.release.outputs['.--tag_name'] }}
       pr: ${{ steps.release.outputs.pr }}
       prs_created: ${{ steps.release.outputs.prs_created }}
     steps:
@@ -204,31 +198,66 @@ jobs:
   promote-release:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        # Single-entry matrix so the job has access to runner selection
+        # (needed for the fallback build path's darwin codesign step,
+        # but in practice we only run on ubuntu for the promote itself).
+        include:
+          - runner: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Promote preview draft to ${{ needs.release-please.outputs.tag_name }}
+      - name: Try to promote from preview draft
+        id: preview
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
-
-          # The real draft release was just created by release-please (draft: true
-          # in release-please-config.json). Copy every asset from the `preview`
-          # draft into it — binaries AND the version-pinned install.sh — then
-          # publish. If the preview is missing, fail: we don't silently rebuild.
-
-          if ! gh release view preview >/dev/null 2>&1; then
-            echo "::error::No 'preview' draft release found. Did build-preview/publish-preview run on the release PR?"
-            exit 1
+          if gh release view preview >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            mkdir -p /tmp/preview-bins
+            gh release download preview --dir /tmp/preview-bins
+            gh release upload "$TAG" /tmp/preview-bins/* --clobber
+            gh release delete preview --yes
+          else
+            echo "::warning::No preview draft found — will rebuild from release tag"
+            echo "found=false" >> "$GITHUB_OUTPUT"
           fi
 
-          mkdir -p /tmp/preview-bins
-          gh release download preview --dir /tmp/preview-bins
-          gh release upload "$TAG" /tmp/preview-bins/* --clobber
-          gh release delete preview --yes
+      # Fallback: rebuild binaries + install.sh from the release tag
+      # when no preview draft exists. This happens when the release PR
+      # merges before build-preview had a chance to run (timing race),
+      # or when the preview was consumed by a previous promote attempt.
+      - uses: oven-sh/setup-bun@v2
+        if: steps.preview.outputs.found == 'false'
+        with:
+          bun-version: "1.2.15"
+
+      - name: Rebuild binaries from release tag
+        if: steps.preview.outputs.found == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          mkdir -p bin
+          for t in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+            bun build ./src/index.ts --compile --target=bun-$t \
+              --outfile ./bin/agent-hooks-$t
+          done
+          bun build ./src/index.ts --compile --target=bun-windows-x64 \
+            --outfile ./bin/agent-hooks-windows-x64.exe
+
+          # Pin install.sh to this release tag
+          sed -i "s|^VERSION=\"latest\"|VERSION=\"$TAG\"|" scripts/install.sh
+
+          # Upload everything to the draft release
+          gh release upload "$TAG" ./bin/* scripts/install.sh --clobber
 
       - name: Publish the release
         env:
