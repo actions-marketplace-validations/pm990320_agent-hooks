@@ -292,12 +292,11 @@ jobs:
           git tag -f "$MAJOR_TAG" "$TAG"
           git push origin "$MAJOR_TAG" --force
 
-  # Publish the Node-compatible JS bundle to npm. Uses npm's trusted
-  # publisher flow (OIDC): the GitHub Actions id-token proves this
-  # workflow is the authorized publisher — no NPM_TOKEN secret needed
-  # after the initial manual publish that creates the package on the
-  # registry. `--provenance` attaches a Sigstore attestation linking
-  # the published tarball to this exact workflow run.
+  # Publish the Node-compatible JS bundle to npm via OIDC trusted
+  # publishers. The GitHub Actions id-token proves this workflow is
+  # the authorized publisher — no NPM_TOKEN secret needed. Requires
+  # npm CLI >= 11.5.1 for OIDC auto-detection (Node 22 ships ~10.x,
+  # so we upgrade npm explicitly).
   publish-npm:
     needs: [release-please, promote-release]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
@@ -318,6 +317,11 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+
+      # npm trusted publishing (OIDC) requires npm >= 11.5.1.
+      # Node 22 ships npm ~10.x which predates this feature.
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest && npm --version
 
       - run: bun install --frozen-lockfile
 
