@@ -269,7 +269,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -277,32 +276,21 @@ jobs:
           # (pm990320/agent-hooks@v0, @v1, etc.) so they get patches
           # without touching their workflow. Move that tag forward on
           # every release — e.g. v0.1.5 also updates v0.
+          #
+          # Uses `git tag -f` + `git push --force` instead of the
+          # REST API because the /git/refs/ endpoint does prefix
+          # matching on GET and 404s on PATCH for short tag names
+          # like "v0" that are prefixes of longer tags (v0.1.0 etc).
           MAJOR_TAG="${TAG%%.*}"   # v0.1.5 → v0
           if [ "$MAJOR_TAG" = "$TAG" ]; then
             echo "::warning::tag '$TAG' does not look like vMAJOR.MINOR.PATCH — skipping rolling-tag update"
             exit 0
           fi
 
-          SHA=$(gh api "repos/$REPO/git/refs/tags/$TAG" --jq .object.sha)
-          echo "Rolling $MAJOR_TAG → $SHA (from $TAG)"
-
-          # Check exact-match existence of refs/tags/$MAJOR_TAG via
-          # the matching-refs endpoint. Do NOT use GET /git/refs/tags/$MAJOR_TAG
-          # for this check — that endpoint does PREFIX matching, so
-          # querying "v0" will match "v0.1.0" and lie that v0 exists,
-          # which then makes PATCH /git/refs/tags/v0 fail with 422
-          # "Reference does not exist".
-          exists=$(gh api "repos/$REPO/git/matching-refs/tags/$MAJOR_TAG" \
-            --jq "[.[] | select(.ref == \"refs/tags/$MAJOR_TAG\")] | length")
-          if [ "$exists" -gt 0 ]; then
-            echo "Updating existing refs/tags/$MAJOR_TAG"
-            gh api -X PATCH "repos/$REPO/git/refs/tags/$MAJOR_TAG" \
-              -f sha="$SHA" -F force=true
-          else
-            echo "Creating new refs/tags/$MAJOR_TAG"
-            gh api -X POST "repos/$REPO/git/refs" \
-              -f ref="refs/tags/$MAJOR_TAG" -f sha="$SHA"
-          fi
+          echo "Rolling $MAJOR_TAG → $TAG"
+          git fetch origin "refs/tags/$TAG:refs/tags/$TAG" --no-tags
+          git tag -f "$MAJOR_TAG" "$TAG"
+          git push origin "$MAJOR_TAG" --force
 
   # Publish the Node-compatible JS bundle to npm. Uses npm's trusted
   # publisher flow (OIDC): the GitHub Actions id-token proves this
