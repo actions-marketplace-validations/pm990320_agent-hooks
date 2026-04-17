@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/pm990320/agent-hooks/compare/v0.3.2...v0.3.3) (2026-04-17)
+
+
+### Bug Fixes
+
+* use npx npm@latest for publish instead of broken in-place upgrade ([3d2c88b](https://github.com/pm990320/agent-hooks/commit/3d2c88b65b96bf78b8980cde9da0da9e108ada45))
+
 ## [0.3.2](https://github.com/pm990320/agent-hooks/compare/v0.3.1...v0.3.2) (2026-04-17)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "@pm990320/agent-hooks",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "One command for CI, pre-commit hooks, and agent feedback loops. Ships as a single binary.",
   "keywords": [
     "ci",
