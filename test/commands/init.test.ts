@@ -125,7 +125,8 @@ describe("runInitCommand — detector-driven templates", () => {
     );
     expect(outcome.detectors).toEqual(["node-bun"]);
     const written = memFs.files.get("/repo/.config/agent-hooks.yml");
-    expect(written).toContain("bun run lint");
+    expect(written).toContain("eslint {files}");
+    expect(written).toContain("eslint .");
     expect(written).toContain("bun test {files}");
     expect(written).toContain("bun install");
     expect(written).toContain("post-merge");

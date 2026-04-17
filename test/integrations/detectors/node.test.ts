@@ -43,8 +43,12 @@ describe("bunDetector", () => {
   test("template emits lint/typecheck/test/build steps + reinstall hook", async () => {
     const fs = memFs({ "/repo/bun.lockb": "" });
     const fragment = await bunDetector.template({ cwd: "/repo", fs });
-    expect(fragment.steps?.["lint"]?.run).toContain("bun run lint");
+    // Lint uses two-form run: per-file on edit, full project on CI
+    const lintRun = fragment.steps?.["lint"]?.run as { files?: string; project?: string };
+    expect(lintRun.files).toContain("eslint {files}");
+    expect(lintRun.project).toContain("eslint .");
     expect(fragment.steps?.["typecheck"]?.run).toContain("bun x tsc --noEmit");
+    // Test falls back to bun test when no vitest/jest detected in deps
     expect(fragment.steps?.["test"]?.run).toContain("bun test {files}");
     expect(fragment.steps?.["build"]?.run).toContain("bun run build");
     expect(fragment.steps?.["install-deps"]?.run).toBe("bun install");
@@ -67,7 +71,10 @@ describe("pnpmDetector", () => {
   test("template uses pnpm runner", async () => {
     const fs = memFs({ "/repo/pnpm-lock.yaml": "" });
     const fragment = await pnpmDetector.template({ cwd: "/repo", fs });
-    expect(fragment.steps?.["lint"]?.run).toBe("pnpm run lint");
+    const lintRun = fragment.steps?.["lint"]?.run as { files?: string; project?: string };
+    expect(lintRun.files).toContain("eslint {files}");
+    expect(lintRun.project).toContain("eslint .");
+    // No vitest/jest in deps → plain pnpm run test
     expect(fragment.steps?.["test"]?.run).toBe("pnpm run test");
     expect(fragment.steps?.["install-deps"]?.run).toBe("pnpm install");
   });
@@ -87,7 +94,9 @@ describe("yarnDetector", () => {
   test("template uses yarn runner (no `run` prefix)", async () => {
     const fs = memFs({ "/repo/yarn.lock": "" });
     const fragment = await yarnDetector.template({ cwd: "/repo", fs });
-    expect(fragment.steps?.["lint"]?.run).toBe("yarn lint");
+    const lintRun = fragment.steps?.["lint"]?.run as { files?: string; project?: string };
+    expect(lintRun.files).toContain("eslint {files}");
+    expect(lintRun.project).toContain("eslint .");
     expect(fragment.steps?.["install-deps"]?.run).toBe("yarn install");
   });
 });

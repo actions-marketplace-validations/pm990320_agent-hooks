@@ -120,6 +120,105 @@ Which variant runs depends on the file list:
 
 When `project` runs, `{files}` is not substituted.
 
+## Per-file linting
+
+Most linters accept file paths directly. Use the two-form `run:`
+syntax so agent-edit / pre-commit hooks only lint the files that
+actually changed, while CI still checks the whole project.
+
+### Linter recipes
+
+**ESLint** (JavaScript / TypeScript):
+
+```yaml
+lint:
+  run:
+    files: eslint {files}
+    project: eslint .
+  files: "**/*.{ts,tsx,js,jsx,mjs,cjs}"
+```
+
+**Biome** (JavaScript / TypeScript / JSON / CSS):
+
+```yaml
+lint:
+  run:
+    files: biome check {files}
+    project: biome check .
+  files: "**/*.{ts,tsx,js,jsx,json,css}"
+```
+
+**Prettier** (formatting check):
+
+```yaml
+format-check:
+  run:
+    files: prettier --check {files}
+    project: prettier --check .
+  files: "**/*.{ts,tsx,js,jsx,css,json,md}"
+```
+
+**Ruff** (Python — already per-file by default):
+
+```yaml
+lint:
+  run: ruff check {files}
+  files: "**/*.py"
+```
+
+Ruff is fast enough that per-file vs project makes little
+difference, but the `files:` glob still filters the scope to
+relevant files.
+
+**Pylint** (Python):
+
+```yaml
+lint:
+  run:
+    files: pylint {files}
+    project: pylint src/
+  files: "**/*.py"
+```
+
+**golangci-lint** (Go):
+
+```yaml
+lint:
+  run:
+    files: golangci-lint run {files}
+    project: golangci-lint run ./...
+  files: "**/*.go"
+```
+
+**Shellcheck:**
+
+```yaml
+shellcheck:
+  run: shellcheck {files}
+  files: "**/*.sh"
+  invocation: per-file
+  parallel: 8
+```
+
+Shellcheck is inherently per-file. `invocation: per-file` + `parallel`
+runs up to 8 files concurrently.
+
+### Linters that can't be narrowed
+
+Some tools need the full project context and can't lint one file
+in isolation:
+
+- **TypeScript (`tsc --noEmit`)** — needs the full type graph.
+  Keep `invocation: project`.
+- **Cargo clippy** — works per-crate, not per-file. Keep
+  `invocation: project`.
+- **mypy** — needs the full program for type inference. Keep
+  `invocation: project`.
+
+For these, set `invocation: project` and accept that they run in
+full on every hook. They're typically fast enough that the cost is
+acceptable (tsc incremental: ~2-5s, clippy incremental: ~1-3s).
+
 ## Affected-only testing
 
 Running the full test suite on every agent edit is slow and noisy.

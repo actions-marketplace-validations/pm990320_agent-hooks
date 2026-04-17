@@ -139,9 +139,13 @@ function nodeFragment(
   return {
     steps: {
       lint: {
-        run: `${r.run} lint`,
+        run: {
+          files: `${r.exec} eslint {files}`,
+          project: `${r.exec} eslint .`,
+        },
+        files: "**/*.{ts,tsx,js,jsx,mjs,cjs}",
         tags: ["fast", "lint"],
-        description: `Run the project's \`lint\` script via ${manager}`,
+        description: `Lint affected files on edit, full project on CI`,
       },
       typecheck: {
         run: `${r.exec} tsc --noEmit`,
