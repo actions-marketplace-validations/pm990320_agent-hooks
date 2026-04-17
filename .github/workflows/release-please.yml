@@ -318,15 +318,14 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      # npm trusted publishing (OIDC) requires npm >= 11.5.1.
-      # Node 22 ships npm ~10.x which predates this feature.
-      - name: Upgrade npm for OIDC support
-        run: npm install -g npm@latest && npm --version
-
       - run: bun install --frozen-lockfile
 
       - name: Build Node-compatible JS bundle
         run: bun run build:npm
 
+      # npm trusted publishing (OIDC) requires npm >= 11.5.1.
+      # Node 22 ships npm ~10.x. Use npx to run latest npm for
+      # just the publish command rather than upgrading in-place
+      # (which breaks with MODULE_NOT_FOUND on some runners).
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: npx npm@latest publish --provenance --access public
