@@ -155,7 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           npm pack
-          mv agent-hooks-*.tgz /tmp/agent-hooks.tgz
+          mv pm990320-agent-hooks-*.tgz /tmp/agent-hooks.tgz
           echo "=== tarball contents ==="
           tar tzf /tmp/agent-hooks.tgz | sort
 
