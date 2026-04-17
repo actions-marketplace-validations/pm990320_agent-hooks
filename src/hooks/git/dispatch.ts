@@ -105,7 +105,10 @@ export async function dispatchGitHook(
     });
   }
 
-  const scope = scopeForGitHook(options.hookName);
+  // Use the config-level scope override if set, otherwise fall back
+  // to the hook name's default (pre-commit → staged, post-merge →
+  // changed, etc.).
+  const scope = rule.scope ?? scopeForGitHook(options.hookName);
   const resolved = await resolveFiles(options.git, { scope });
 
   options.reporter.pipelineStart(rule.pipeline);

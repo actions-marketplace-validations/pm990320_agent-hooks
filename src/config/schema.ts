@@ -149,9 +149,25 @@ export const GIT_HOOK_NAMES = [
 
 export type GitHookName = (typeof GIT_HOOK_NAMES)[number];
 
+const GitHookScope = z.enum(["staged", "changed", "all"]);
+
 const GitHookRule = z
   .object({
     pipeline: NonEmptyString,
+    /**
+     * Override the file scope for this hook. Defaults differ by hook
+     * name (pre-commit → staged, post-merge → changed, etc.) and are
+     * set in `scopeForGitHook` in the dispatcher. Setting this
+     * explicitly overrides the default:
+     *
+     *   staged  — only `git diff --cached` files (default for
+     *             pre-commit / commit-msg / prepare-commit-msg)
+     *   changed — files that differ from the merge-base with the
+     *             default branch (default for post-merge /
+     *             post-checkout / post-rewrite)
+     *   all     — every tracked file
+     */
+    scope: GitHookScope.optional(),
     "if-missing": OnMissing.optional(),
   })
   .strict();
