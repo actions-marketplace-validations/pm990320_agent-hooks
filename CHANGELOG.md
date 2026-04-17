@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.0](https://github.com/pm990320/agent-hooks/compare/v0.2.0...v0.3.0) (2026-04-17)
+
+
+### Features
+
+* node-compatible npm distribution via bun build --target=node ([38f1b72](https://github.com/pm990320/agent-hooks/commit/38f1b725ed844302078128ddeb7041bcaa806a29))
+* thin npm wrapper package with postinstall binary download ([a550b37](https://github.com/pm990320/agent-hooks/commit/a550b37a87281354d717f4692b0598151d772458))
+
+
+### Bug Fixes
+
+* cross-platform shebang replacement in build:npm (bun -e instead of sed) ([71d968c](https://github.com/pm990320/agent-hooks/commit/71d968cd9d3151736fe8e147f71b7f72ce44796b))
+* lint/typecheck/test errors in spawn shim and scoped package name ([a1b0694](https://github.com/pm990320/agent-hooks/commit/a1b06949abe1704bd3bd1d74f9210f990e6e5cc5))
+* read release-please v4 manifest-mode outputs correctly ([0bd5134](https://github.com/pm990320/agent-hooks/commit/0bd51348e039d119a4ae8f09622b4dce744897cd))
+* scope package to @pm990320/agent-hooks + use npm trusted publishers (OIDC) ([61975b2](https://github.com/pm990320/agent-hooks/commit/61975b29e4faf97547a53494d15392b583cd2eba))
+* scoped package tarball name in npm smoke test ([ea5f004](https://github.com/pm990320/agent-hooks/commit/ea5f004e3a3fef111b54ccf1499c249dd1102888))
+* use linux-compatible sed -i (no backup suffix arg) ([3c55951](https://github.com/pm990320/agent-hooks/commit/3c55951c6b63421b8b1857480e45decf4a189d45))
+
+
+### Documentation
+
+* clean up README — npm/bun install first, remove early-dev status, tighten copy ([9b535b2](https://github.com/pm990320/agent-hooks/commit/9b535b24e02616245445c87df958da176edb2341))
+
 ## [0.2.0](https://github.com/pm990320/agent-hooks/compare/v0.1.0...v0.2.0) (2026-04-16)
 
 
