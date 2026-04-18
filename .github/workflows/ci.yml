@@ -5,16 +5,6 @@ on:
     branches:
       - main
   pull_request:
-  # pull_request_target runs the workflow from the BASE branch and
-  # doesn't require approval — GitHub trusts it because it uses
-  # main's workflow file, not the PR head's. We scope it to the
-  # release-please branch so bot-authored release PRs get CI
-  # without the "action_required" gate that blocks regular
-  # pull_request events from github-actions[bot].
-  pull_request_target:
-    branches:
-      - main
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -25,27 +15,11 @@ concurrency:
 
 jobs:
   check:
-    # Skip pull_request_target for human PRs — pull_request already
-    # covers those. Only pull_request_target from bots (github-actions[bot])
-    # should proceed, avoiding duplicate runs.
-    if: >-
-      github.event_name != 'pull_request_target' ||
-      github.actor == 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history so agent-hooks' change-gates can resolve
-          # origin/main for `since: merge-base` comparisons, and
-          # `since: head` can reach changed() without throwing. The
-          # default fetch-depth: 1 gives a detached HEAD with no base
-          # ref, which crashed the pipeline runner pre-ah-8cq.
           fetch-depth: 0
-          # pull_request_target defaults to checking out the BASE
-          # branch. Override to the PR head so we actually test the
-          # PR's code. Safe here because we gate pull_request_target
-          # to github-actions[bot] only (release-please).
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:
