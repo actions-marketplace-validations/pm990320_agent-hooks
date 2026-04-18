@@ -392,6 +392,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -413,6 +421,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
@@ -436,6 +452,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -457,6 +481,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
@@ -480,6 +512,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -501,6 +541,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
@@ -524,6 +572,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -545,6 +601,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
@@ -568,6 +632,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -589,6 +661,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
@@ -612,6 +692,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -633,6 +721,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
@@ -656,6 +752,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -677,6 +781,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
@@ -700,6 +812,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -722,6 +842,14 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
+                },
                 "if-missing": {
                   "type": "string",
                   "enum": [
@@ -743,6 +871,14 @@
                 "pipeline": {
                   "type": "string",
                   "minLength": 1
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "staged",
+                    "changed",
+                    "all"
+                  ]
                 },
                 "if-missing": {
                   "type": "string",
