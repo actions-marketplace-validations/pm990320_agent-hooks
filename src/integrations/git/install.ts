@@ -40,6 +40,8 @@ export interface InstallOptions {
   readonly gitRoot: string;
   readonly config: Config;
   readonly fs: HookFs;
+  readonly hash?: string;
+  readonly hookNames?: readonly string[];
   /**
    * How to handle a `.git/hooks/<name>` that already exists and is NOT
    * managed by agent-hooks.
@@ -118,8 +120,8 @@ async function removeOrphans(
 export async function installHooks(
   options: InstallOptions,
 ): Promise<InstallResult> {
-  const hash = configHash(options.config);
-  const expected = expectedHookNames(options.config);
+  const hash = options.hash ?? configHash(options.config);
+  const expected = [...(options.hookNames ?? expectedHookNames(options.config))];
   const expectedSet = new Set(expected);
   const outcomes: HookInstallOutcome[] = [];
 

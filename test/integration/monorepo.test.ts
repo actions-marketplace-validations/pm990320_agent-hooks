@@ -143,4 +143,32 @@ describe("monorepo lifecycle", () => {
     expect(result.stdout).not.toContain("SERVICE_B_LINT");
     expect(result.stderr).not.toContain("no rule configured");
   });
+
+  test("list groups root and workspace targets", async () => {
+    const result = await runCli(["list"], { cwd: fixture.cwd });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("project mode: monorepo");
+    expect(result.stdout).toContain("root:");
+    expect(result.stdout).toContain("workspace services/service-a:");
+    expect(result.stdout).toContain("workspace services/service-b:");
+  });
+
+  test("doctor reports monorepo status and workspace configs", async () => {
+    const result = await runCli(["doctor"], { cwd: fixture.cwd });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Monorepo root:");
+    expect(result.stdout).toContain("Workspaces discovered: 2");
+    expect(result.stdout).toContain("workspace services/service-a config loaded");
+    expect(result.stdout).toContain("workspace services/service-b config loaded");
+  });
+
+  test("install writes repo-root stubs for monorepo hook names", async () => {
+    const result = await runCli(["install"], { cwd: fixture.cwd });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("install complete");
+
+    const doctor = await runCli(["doctor"], { cwd: fixture.cwd });
+    expect(doctor.exitCode).toBe(0);
+    expect(doctor.stdout).toContain("✓ pre-commit");
+  });
 });
