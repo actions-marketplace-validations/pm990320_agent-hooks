@@ -10,6 +10,14 @@
       "type": "string",
       "minLength": 1
     },
+    "workspaces": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "steps": {
       "default": {},
       "type": "object",
@@ -1035,6 +1043,20 @@
             "type": "string",
             "minLength": 1
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "monorepo": {
+      "type": "object",
+      "properties": {
+        "run-workspace-selection-default": {
+          "default": "affected",
+          "type": "string",
+          "enum": [
+            "affected",
+            "all"
+          ]
         }
       },
       "additionalProperties": false

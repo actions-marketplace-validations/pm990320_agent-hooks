@@ -121,31 +121,45 @@ async function findFirst(
   }
 }
 
-export async function loadConfig(
-  options: LoadOptions = {},
+export async function findFirstUpwards(
+  cwd: string,
+  candidates: readonly string[],
+  fs: LoaderFs,
+): Promise<string | null> {
+  return findFirst(cwd, candidates, fs);
+}
+
+export async function findFirstInDir(
+  dir: string,
+  candidates: readonly string[],
+  fs: LoaderFs,
+): Promise<string | null> {
+  const resolved = path.resolve(dir);
+  for (const rel of candidates) {
+    const abs = path.join(resolved, rel);
+    if (await fs.exists(abs)) return abs;
+  }
+  return null;
+}
+
+export function configRootDir(sourcePath: string): string {
+  const dir = path.dirname(path.resolve(sourcePath));
+  return path.basename(dir) === ".config" ? path.dirname(dir) : dir;
+}
+
+export async function findLocalOverrideFor(
+  sourcePath: string,
+  fs: LoaderFs,
+): Promise<string | null> {
+  return findFirstInDir(configRootDir(sourcePath), LOCAL_OVERRIDES, fs);
+}
+
+export async function loadConfigFromPath(
+  sourcePath: string,
+  fs: LoaderFs = defaultFs,
 ): Promise<LoadedConfig> {
-  const cwd = options.cwd ?? process.cwd();
-  const fs = options.fs ?? defaultFs;
-
-  const sourcePath = options.configPath
-    ? path.resolve(cwd, options.configPath)
-    : await findFirst(cwd, CONFIG_CANDIDATES, fs);
-
-  if (!sourcePath) {
-    throw new ConfigNotFoundError(
-      cwd,
-      CONFIG_CANDIDATES.map((c) => path.join(cwd, c)),
-    );
-  }
-
-  if (options.configPath && !(await fs.exists(sourcePath))) {
-    throw new ConfigError(`Config file not found: ${sourcePath}`, {
-      path: sourcePath,
-    });
-  }
-
   const baseRaw = parseConfigText(await fs.read(sourcePath), sourcePath);
-  const localPath = await findFirst(cwd, LOCAL_OVERRIDES, fs);
+  const localPath = await findLocalOverrideFor(sourcePath, fs);
   const merged = localPath
     ? deepMerge(
         baseRaw,
@@ -166,4 +180,30 @@ export async function loadConfig(
     sourcePath,
     localPath,
   };
+}
+
+export async function loadConfig(
+  options: LoadOptions = {},
+): Promise<LoadedConfig> {
+  const cwd = options.cwd ?? process.cwd();
+  const fs = options.fs ?? defaultFs;
+
+  const sourcePath = options.configPath
+    ? path.resolve(cwd, options.configPath)
+    : await findFirstUpwards(cwd, CONFIG_CANDIDATES, fs);
+
+  if (!sourcePath) {
+    throw new ConfigNotFoundError(
+      cwd,
+      CONFIG_CANDIDATES.map((c) => path.join(cwd, c)),
+    );
+  }
+
+  if (options.configPath && !(await fs.exists(sourcePath))) {
+    throw new ConfigError(`Config file not found: ${sourcePath}`, {
+      path: sourcePath,
+    });
+  }
+
+  return loadConfigFromPath(sourcePath, fs);
 }

@@ -317,6 +317,31 @@ describe("ConfigSchema — root", () => {
     expect(config.steps.lint?.env?.CUSTOM).toBe("value");
   });
 
+  test("accepts workspaces at the root", () => {
+    const config = ConfigSchema.parse({
+      workspaces: ["services/*", "packages/api"],
+    });
+    expect(config.workspaces).toEqual(["services/*", "packages/api"]);
+  });
+
+  test("accepts monorepo config with default dispatch mode", () => {
+    const config = ConfigSchema.parse({ monorepo: {} });
+    expect(config.monorepo?.["run-workspace-selection-default"]).toBe(
+      "affected",
+    );
+  });
+
+  test("accepts every monorepo run-workspace-selection-default value", () => {
+    for (const value of ["affected", "all"] as const) {
+      const config = ConfigSchema.parse({
+        monorepo: { "run-workspace-selection-default": value },
+      });
+      expect(config.monorepo?.["run-workspace-selection-default"]).toBe(
+        value,
+      );
+    }
+  });
+
   test("rejects unknown root fields (strict)", () => {
     expect(() => ConfigSchema.parse({ nope: 1 })).toThrow();
   });

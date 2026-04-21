@@ -231,12 +231,23 @@ const DoctorSchema = z
   })
   .strict();
 
+// --- Monorepo ------------------------------------------------------------
+
+const MonorepoSchema = z
+  .object({
+    "run-workspace-selection-default": z
+      .enum(["affected", "all"])
+      .default("affected"),
+  })
+  .strict();
+
 // --- Root ----------------------------------------------------------------
 
 export const ConfigSchema = z
   .object({
     $schema: NonEmptyString.optional(),
     name: NonEmptyString.optional(),
+    workspaces: z.array(NonEmptyString).min(1).optional(),
     steps: z.record(NonEmptyString, StepSchema).default({}),
     pipelines: z.record(NonEmptyString, PipelineSchema).default({}),
     git: GitSchema.optional(),
@@ -245,6 +256,7 @@ export const ConfigSchema = z
     env: z.record(NonEmptyString, NonEmptyString).optional(),
     install: InstallSchema.optional(),
     doctor: DoctorSchema.optional(),
+    monorepo: MonorepoSchema.optional(),
   })
   .strict();
 
