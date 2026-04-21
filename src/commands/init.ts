@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import nodeFs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
+import { stdin as input, stdout as output } from "node:process";
 import YAML from "yaml";
 import { ExitError } from "../cli.ts";
 import { ConfigSchema } from "../config/schema.ts";
@@ -63,6 +64,8 @@ export interface InitFs {
   list?(dir: string): Promise<readonly string[]>;
 }
 
+export type MonorepoPrompter = () => Promise<boolean>;
+
 export interface InitCommandDeps {
   readonly cwd: string;
   readonly write: (text: string) => void;
@@ -88,6 +91,13 @@ export interface InitCommandDeps {
    * fs adapter wrapping InitFs.
    */
   readonly agentsMdFs?: AgentsMdFs;
+  /**
+   * Optional prompt used by init to decide whether to scaffold the
+   * current repo as a monorepo root when --monorepo was not passed.
+   * Defaults to a TTY-only yes/no prompt; non-interactive runs never
+   * block and simply keep the existing single-repo scaffold.
+   */
+  readonly monorepoPrompter?: MonorepoPrompter;
 }
 
 export interface InitArgs {
@@ -103,6 +113,8 @@ export interface InitArgs {
   readonly noTemplates?: boolean;
   /** Project name for the generated config (`name:` field). */
   readonly name?: string;
+  /** Scaffold a monorepo root manifest/config instead of a single-project config. */
+  readonly monorepo?: boolean;
   /**
    * Override the GitHub Actions workflow file name. Defaults to
    * `agent-hooks.yml`; useful when `agent-hooks.yml` is already in use
@@ -175,6 +187,35 @@ jobs:
       - uses: pm990320/agent-hooks@v1
       - run: agent-hooks ci
 `;
+
+export function renderMonorepoConfigYaml(name = "my-project"): string {
+  const header = [
+    "# yaml-language-server: $schema=https://raw.githubusercontent.com/pm990320/agent-hooks/main/schema.json",
+    "",
+    "# Monorepo root scaffold — edit `workspaces` to match your repo layout.",
+    "# Child workspace configs stay service-owned and live under each workspace root.",
+    "",
+  ];
+  const document: Record<string, unknown> = {
+    name,
+    workspaces: ["services/*"],
+    monorepo: {
+      "run-workspace-selection-default": "affected",
+    },
+    steps: {},
+    pipelines: {},
+  };
+  return `${header.join("\n")}${YAML.stringify(document, { lineWidth: 0 })}`;
+}
+
+async function resolveMonorepoInitMode(
+  args: InitArgs,
+  deps: InitCommandDeps,
+): Promise<boolean> {
+  if (args.monorepo === true) return true;
+  if (!deps.monorepoPrompter) return false;
+  return await deps.monorepoPrompter();
+}
 
 // --- Core action ---------------------------------------------------------
 
@@ -528,23 +569,33 @@ export async function runInitCommand(
   // to "no config detected" and the caller falls through to defaults.
   const installCfg = await readExistingInstallConfig(deps);
 
-  const fragment = await resolveFragment(args, deps);
-  const configYaml = renderConfigYaml(
-    {
-      steps: fragment.steps as typeof FALLBACK_FRAGMENT.steps,
-      pipelines: fragment.pipelines as typeof FALLBACK_FRAGMENT.pipelines,
-      gitHooks: fragment.gitHooks as typeof FALLBACK_FRAGMENT.gitHooks,
-      detectorNames: fragment.detectorNames,
-      notes: fragment.notes,
-    },
-    args.name ?? "my-project",
-  );
+  const monorepoInit = await resolveMonorepoInitMode(args, deps);
+
+  let fragment: Awaited<ReturnType<typeof resolveFragment>> | undefined;
+  let configYaml: string;
+  if (monorepoInit) {
+    configYaml = renderMonorepoConfigYaml(args.name ?? "my-project");
+  } else {
+    fragment = await resolveFragment(args, deps);
+    configYaml = renderConfigYaml(
+      {
+        steps: fragment.steps as typeof FALLBACK_FRAGMENT.steps,
+        pipelines: fragment.pipelines as typeof FALLBACK_FRAGMENT.pipelines,
+        gitHooks: fragment.gitHooks as typeof FALLBACK_FRAGMENT.gitHooks,
+        detectorNames: fragment.detectorNames,
+        notes: fragment.notes,
+      },
+      args.name ?? "my-project",
+    );
+  }
+
+  const detectorNames = fragment?.detectorNames ?? [];
 
   // Print a short plan summary so users see which detectors fired.
-  if (fragment.detectorNames.length > 0) {
-    deps.write(
-      `  detect  ${fragment.detectorNames.join(", ")}\n`,
-    );
+  if (monorepoInit) {
+    deps.write(`  detect  monorepo root scaffold\n`);
+  } else if (detectorNames.length > 0) {
+    deps.write(`  detect  ${detectorNames.join(", ")}\n`);
   } else {
     deps.write(`  detect  none — using minimal skeleton\n`);
   }
@@ -691,7 +742,7 @@ export async function runInitCommand(
       wroteWorkflow,
       installedHooks,
       postinstall,
-      detectors: fragment.detectorNames,
+      detectors: detectorNames,
       skillsInstalled: skillInstalled,
       agentsMd: agentsMdOutcomes,
     },
@@ -809,24 +860,41 @@ export const defaultPostinstallFs: PostinstallFs = {
  * fallback so piped / scripted `init` runs never block waiting for
  * input that will never come.
  */
+function promptWithReadline(prompt: string): Promise<string> {
+  return new Promise<string>((resolve) => {
+    const rl = readline.createInterface({
+      input,
+      output,
+    });
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
 export function defaultConflictPrompter(): ConflictPrompter {
   if (!process.stdin.isTTY) {
     return nonInteractiveKeepPrompter;
   }
   return createInteractivePrompter({
     write: (text) => process.stdout.write(text),
-    read: (prompt) =>
-      new Promise<string>((resolve) => {
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-        rl.question(prompt, (answer) => {
-          rl.close();
-          resolve(answer);
-        });
-      }),
+    read: (prompt) => promptWithReadline(prompt),
   });
+}
+
+export function defaultMonorepoPrompter(): MonorepoPrompter {
+  if (!process.stdin.isTTY) {
+    return () => Promise.resolve(false);
+  }
+  return async () => {
+    const answer = (
+      await promptWithReadline("Is this repo a monorepo? [y/N] ")
+    )
+      .trim()
+      .toLowerCase();
+    return answer === "y" || answer === "yes";
+  };
 }
 
 // --- Commander registration ---------------------------------------------
@@ -842,6 +910,7 @@ export function registerInitCommand(
     )
     .option("--force", "overwrite existing files")
     .option("--dry-run", "print planned actions without writing")
+    .option("--monorepo", "scaffold a monorepo root manifest/config")
     .option("--with-postinstall", "force postinstall wiring")
     .option("--no-postinstall", "skip postinstall wiring")
     .option("--with-github-actions", "force GH Actions workflow scaffolding")
@@ -869,6 +938,7 @@ export function registerInitCommand(
       const flags: {
         force?: boolean;
         dryRun?: boolean;
+        monorepo?: boolean;
         postinstall?: boolean;
         githubActions?: boolean;
         withPostinstall?: boolean;
@@ -886,11 +956,14 @@ export function registerInitCommand(
         hookFs: overrides.hookFs ?? defaultHookFs,
         postinstallFs: overrides.postinstallFs ?? defaultPostinstallFs,
         prompter: overrides.prompter ?? defaultConflictPrompter(),
+        monorepoPrompter:
+          overrides.monorepoPrompter ?? defaultMonorepoPrompter(),
       };
       // Commander's --no-foo sets flags.foo = false; --foo sets true.
       const args: InitArgs = {
         ...(flags.force ? { force: true } : {}),
         ...(flags.dryRun ? { dryRun: true } : {}),
+        ...(flags.monorepo ? { monorepo: true } : {}),
         ...(flags.postinstall === false ? { noPostinstall: true } : {}),
         ...(flags.postinstall === true ? { withPostinstall: true } : {}),
         ...(flags.githubActions === false ? { noGithubActions: true } : {}),
