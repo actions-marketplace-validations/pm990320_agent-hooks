@@ -10,6 +10,8 @@ whether to try it; this is for people using it.
   pieces fit together
 - [Configuration](./configuration.md) — `.config/agent-hooks.yml`
   schema, every key, every default
+- [Monorepo design](./monorepo.md) — service-owned configs, root
+  coordination, selectors, and hook fan-out
 - [CLI reference](./cli.md) — every command, flag, and exit code
 - [Pipelines and steps](./pipelines-and-steps.md) — the execution
   model, scopes, invocation modes, and parallelism

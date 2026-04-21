@@ -186,6 +186,7 @@ are defined.
 
 - [Architecture](./docs/architecture.md)
 - [Configuration](./docs/configuration.md)
+- [Monorepo design](./docs/monorepo.md)
 - [CLI reference](./docs/cli.md)
 - [Pipelines and steps](./docs/pipelines-and-steps.md)
 - [Stack detection](./docs/stack-detection.md)
