@@ -10,3 +10,17 @@ steps:
 pipelines:
   ci:
     steps: [lint]
+  pre-commit:
+    steps: [lint]
+  agent-edit:
+    steps: [lint]
+git:
+  hooks:
+    pre-commit:
+      pipeline: pre-commit
+agents:
+  claude-code:
+    hooks:
+      PostToolUse:
+        - matcher: Edit|Write
+          pipeline: agent-edit

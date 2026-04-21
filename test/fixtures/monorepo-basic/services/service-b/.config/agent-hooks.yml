@@ -6,3 +6,9 @@ steps:
 pipelines:
   ci:
     steps: [lint]
+  pre-commit:
+    steps: [lint]
+git:
+  hooks:
+    pre-commit:
+      pipeline: pre-commit

@@ -40,6 +40,7 @@ export interface GitHookDispatchOptions {
   readonly cwd: string;
   readonly env: Record<string, string>;
   readonly git: GitRunner;
+  readonly resolvedFiles?: readonly string[];
   readonly exec: ExecFn;
   readonly reporter: Reporter;
   /** Writer for operational messages (auto-staging, diagnostics). */
@@ -109,7 +110,10 @@ export async function dispatchGitHook(
   // to the hook name's default (pre-commit → staged, post-merge →
   // changed, etc.).
   const scope = rule.scope ?? scopeForGitHook(options.hookName);
-  const resolved = await resolveFiles(options.git, { scope });
+  const resolved =
+    options.resolvedFiles !== undefined
+      ? { scope, files: options.resolvedFiles }
+      : await resolveFiles(options.git, { scope });
 
   options.reporter.pipelineStart(rule.pipeline);
   const result = await runPipeline(
