@@ -73,29 +73,29 @@ export function resolveSkillPaths(
 }
 
 export interface SkillFs {
-  mkdirRecursive(p: string): Promise<void>;
-  write(p: string, contents: string): Promise<void>;
-  exists(p: string): Promise<boolean>;
-  remove(p: string): Promise<void>;
+  mkdirRecursive(dirPath: string): Promise<void>;
+  write(filePath: string, contents: string): Promise<void>;
+  exists(filePath: string): Promise<boolean>;
+  remove(filePath: string): Promise<void>;
 }
 
 export const defaultSkillFs: SkillFs = {
-  async mkdirRecursive(p) {
-    await nodeFs.mkdir(p, { recursive: true });
+  async mkdirRecursive(dirPath) {
+    await nodeFs.mkdir(dirPath, { recursive: true });
   },
-  async write(p, contents) {
-    await nodeFs.writeFile(p, contents, "utf8");
+  async write(filePath, contents) {
+    await nodeFs.writeFile(filePath, contents, "utf8");
   },
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;
     }
   },
-  async remove(p) {
-    await nodeFs.unlink(p);
+  async remove(filePath) {
+    await nodeFs.unlink(filePath);
   },
 };
 

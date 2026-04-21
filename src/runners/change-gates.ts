@@ -64,15 +64,15 @@ async function listChangedFiles(
     // No merge-base base ref available. Keep `staged` only.
   }
   const union = new Set<string>();
-  for (const p of staged) union.add(p);
-  for (const p of changed) union.add(p);
+  for (const filePath of staged) union.add(filePath);
+  for (const filePath of changed) union.add(filePath);
   return [...union];
 }
 
 export interface EvaluateGateOptions {
   readonly stepName: string;
   readonly step: Step;
-  readonly git: GitRunner;
+  readonly git: GitRunner | undefined;
   /** Absolute path to the repo root — used by the last-run cache. */
   readonly cwd: string;
   /**
@@ -130,7 +130,7 @@ export async function evaluateGate(
       : {
           stepName: "unknown",
           step: stepOrOptions,
-          git: git!,
+          git,
           cwd: process.cwd(),
         };
 
@@ -185,6 +185,10 @@ export async function evaluateGate(
       shouldRun: true,
       reason: `last-run hash changed`,
     };
+  }
+
+  if (!options.git) {
+    throw new Error("evaluateGate requires a git runner for git-based change gates");
   }
 
   const changed = await listChangedFiles(options.git, gate.since);

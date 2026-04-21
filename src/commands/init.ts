@@ -52,10 +52,10 @@ import {
 } from "./init-conflicts.ts";
 
 export interface InitFs {
-  exists(p: string): Promise<boolean>;
-  read(p: string): Promise<string>;
-  write(p: string, contents: string, mode?: number): Promise<void>;
-  mkdirRecursive(p: string): Promise<void>;
+  exists(filePath: string): Promise<boolean>;
+  read(filePath: string): Promise<string>;
+  write(filePath: string, contents: string, mode?: number): Promise<void>;
+  mkdirRecursive(dirPath: string): Promise<void>;
   /**
    * List the file names (not full paths) inside `dir`. Returns an
    * empty array if the directory doesn't exist — callers don't want
@@ -239,8 +239,8 @@ export interface InitOutcome {
 
 function initFsAsDetectorFs(fs: InitFs): DetectorFs {
   return {
-    exists: (p) => fs.exists(p),
-    read: (p) => fs.read(p),
+    exists: (filePath) => fs.exists(filePath),
+    read: (filePath) => fs.read(filePath),
   };
 }
 
@@ -261,7 +261,7 @@ async function resolveFragment(
     const detector = getDetector(args.template);
     if (!detector) {
       throw new Error(
-        `unknown detector template: "${args.template}" (known: ${DETECTORS.map((d) => d.name).join(", ")})`,
+        `unknown detector template: "${args.template}" (known: ${DETECTORS.map((detector) => detector.name).join(", ")})`,
       );
     }
     const forced: Detector[] = [
@@ -770,9 +770,9 @@ async function maybeInstallAgentsMdBlock(input: {
 
 function initFsAsAgentsMdFs(fs: InitFs): AgentsMdFs {
   return {
-    exists: (p) => fs.exists(p),
-    read: (p) => fs.read(p),
-    write: (p, contents) => fs.write(p, contents),
+    exists: (filePath) => fs.exists(filePath),
+    read: (filePath) => fs.read(filePath),
+    write: (filePath, contents) => fs.write(filePath, contents),
   };
 }
 
@@ -785,28 +785,28 @@ async function installRequestedSkills(input: {
   const targets: readonly SkillTarget[] =
     target === "auto" ? SKILL_TARGETS : [target as SkillTarget];
   const installed: string[] = [];
-  for (const t of targets) {
-    if (!isSkillTarget(t)) {
-      deps.write(`  skip    skill (unknown target: ${String(t)})\n`);
+  for (const target of targets) {
+    if (!isSkillTarget(target)) {
+      deps.write(`  skip    skill (unknown target: ${String(target)})\n`);
       continue;
     }
     if (dryRun) {
-      deps.write(`  plan    install skill for ${t}\n`);
-      installed.push(t);
+      deps.write(`  plan    install skill for ${target}\n`);
+      installed.push(target);
       continue;
     }
     try {
       const result = await installSkill({
-        target: t,
+        target,
         scope: "user",
         repoCwd: deps.cwd,
         fs: deps.skillFs ?? defaultSkillFs,
       });
       deps.write(`  skill   ${result.filePath}\n`);
-      installed.push(t);
+      installed.push(target);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      deps.write(`  ⚠ skill install failed for ${t}: ${msg}\n`);
+      deps.write(`  ⚠ skill install failed for ${target}: ${msg}\n`);
     }
   }
   return installed;
@@ -819,25 +819,25 @@ function isSkillTarget(value: string): value is SkillTarget {
 // --- Default FS adapter --------------------------------------------------
 
 export const defaultInitFs: InitFs = {
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;
     }
   },
-  read(p) {
-    return nodeFs.readFile(p, "utf8");
+  read(filePath) {
+    return nodeFs.readFile(filePath, "utf8");
   },
-  async write(p, contents, mode) {
-    await nodeFs.writeFile(p, contents, "utf8");
+  async write(filePath, contents, mode) {
+    await nodeFs.writeFile(filePath, contents, "utf8");
     if (mode !== undefined) {
-      await nodeFs.chmod(p, mode);
+      await nodeFs.chmod(filePath, mode);
     }
   },
-  async mkdirRecursive(p) {
-    await nodeFs.mkdir(p, { recursive: true });
+  async mkdirRecursive(dirPath) {
+    await nodeFs.mkdir(dirPath, { recursive: true });
   },
   async list(dir) {
     try {
@@ -849,9 +849,9 @@ export const defaultInitFs: InitFs = {
 };
 
 export const defaultPostinstallFs: PostinstallFs = {
-  exists: (p) => defaultInitFs.exists(p),
-  read: (p) => defaultInitFs.read(p),
-  write: (p, contents) => defaultInitFs.write(p, contents),
+  exists: (filePath) => defaultInitFs.exists(filePath),
+  read: (filePath) => defaultInitFs.read(filePath),
+  write: (filePath, contents) => defaultInitFs.write(filePath, contents),
 };
 
 /**
@@ -951,7 +951,7 @@ export function registerInitCommand(
       } = this.opts();
       const deps: InitCommandDeps = {
         cwd: overrides.cwd ?? process.cwd(),
-        write: overrides.write ?? ((t) => process.stdout.write(t)),
+        write: overrides.write ?? ((text) => process.stdout.write(text)),
         fs: overrides.fs ?? defaultInitFs,
         hookFs: overrides.hookFs ?? defaultHookFs,
         postinstallFs: overrides.postinstallFs ?? defaultPostinstallFs,

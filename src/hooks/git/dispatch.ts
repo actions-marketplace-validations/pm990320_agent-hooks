@@ -62,9 +62,9 @@ function noopWriter(_text: string): void {
 }
 
 const defaultBeadsFs: BeadsFs = {
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;

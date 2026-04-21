@@ -115,15 +115,15 @@ export async function resolveFiles(
       // hard error. Catches accidental `--files /etc/passwd` and
       // hostile paths injected by an upstream agent.
       const root = nodePath.resolve(options.repoRoot);
-      const checked = raw.map((p) => {
-        const absolute = nodePath.isAbsolute(p)
-          ? nodePath.resolve(p)
-          : nodePath.resolve(root, p);
+      const checked = raw.map((filePath) => {
+        const absolute = nodePath.isAbsolute(filePath)
+          ? nodePath.resolve(filePath)
+          : nodePath.resolve(root, filePath);
         const rel = nodePath.relative(root, absolute);
         if (rel.startsWith("..") || nodePath.isAbsolute(rel)) {
-          throw new PathOutsideRepoError(p, root);
+          throw new PathOutsideRepoError(filePath, root);
         }
-        return p;
+        return filePath;
       });
       return { scope: "explicit", files: checked };
     }
@@ -157,7 +157,7 @@ export function filterByGlob(
   if (!glob) return files;
   const nocase = options.nocase ?? defaultNocase();
   const isMatch = picomatch(glob, { dot: true, nocase });
-  return files.filter((f) => isMatch(f));
+  return files.filter((filePath) => isMatch(filePath));
 }
 
 /**
@@ -171,7 +171,7 @@ function defaultNocase(): boolean {
 }
 
 function dedupe(files: readonly string[]): readonly string[] {
-  return [...new Set(files.filter((f) => f.length > 0))];
+  return [...new Set(files.filter((filePath) => filePath.length > 0))];
 }
 
 // --- Default git runner (process-exec-based) -----------------------------
@@ -442,25 +442,25 @@ export function createGitRunner(
       if (result.exitCode !== 0 || result.signal) return [];
       const entries: string[] = [];
       const raw = result.stdout;
-      let i = 0;
-      while (i < raw.length) {
-        const nul = raw.indexOf("\0", i);
+      let offset = 0;
+      while (offset < raw.length) {
+        const nul = raw.indexOf("\0", offset);
         if (nul < 0) break;
         // The first three chars are "XY " — skip them to land on the path.
-        const entry = raw.slice(i, nul);
+        const entry = raw.slice(offset, nul);
         if (entry.length < 3) {
-          i = nul + 1;
+          offset = nul + 1;
           continue;
         }
         const status = entry.slice(0, 2);
         const pathPart = entry.slice(3);
-        i = nul + 1;
+        offset = nul + 1;
         // Rename entries carry a second NUL-delimited "from" path —
         // consume it so we don't mis-read it as a new entry on the
         // next iteration.
         if (status.startsWith("R") || status.startsWith("C")) {
-          const fromNul = raw.indexOf("\0", i);
-          if (fromNul >= 0) i = fromNul + 1;
+          const fromNul = raw.indexOf("\0", offset);
+          if (fromNul >= 0) offset = fromNul + 1;
         }
         entries.push(pathPart);
       }

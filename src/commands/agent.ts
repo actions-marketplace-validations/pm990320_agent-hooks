@@ -48,9 +48,9 @@ export interface AgentCommandDeps {
  */
 function asAgentsMdFs(initFs: InitFs): AgentsMdFs {
   return {
-    exists: (p) => initFs.exists(p),
-    read: (p) => initFs.read(p),
-    write: (p, contents) => initFs.write(p, contents),
+    exists: (filePath) => initFs.exists(filePath),
+    read: (filePath) => initFs.read(filePath),
+    write: (filePath, contents) => initFs.write(filePath, contents),
   };
 }
 
@@ -60,10 +60,10 @@ function asAgentsMdFs(initFs: InitFs): AgentsMdFs {
  */
 function asAgentFs(initFs: InitFs): AgentFs {
   return {
-    exists: (p) => initFs.exists(p),
-    read: (p) => initFs.read(p),
-    write: (p, contents) => initFs.write(p, contents),
-    mkdirRecursive: (p) => initFs.mkdirRecursive(p),
+    exists: (filePath) => initFs.exists(filePath),
+    read: (filePath) => initFs.read(filePath),
+    write: (filePath, contents) => initFs.write(filePath, contents),
+    mkdirRecursive: (dirPath) => initFs.mkdirRecursive(dirPath),
   };
 }
 
@@ -90,7 +90,7 @@ export async function runAgentInstall(
 
   const handler = getAgentHandler(agentName);
   if (!handler) {
-    const known = ["generic", ...AGENT_HANDLERS.map((h) => h.name)].join(
+    const known = ["generic", ...AGENT_HANDLERS.map((handler) => handler.name)].join(
       ", ",
     );
     deps.writeErr(`✗ unknown agent: "${agentName}"\n  known: ${known}\n`);
@@ -282,10 +282,10 @@ export async function runAgentsMdInstall(
   deps.write("agent-hooks instructions:\n");
   reportAgentsMdOutcomes(deps, outcomes);
   const touched = outcomes.some(
-    (o) => o.action === "inserted" || o.action === "refreshed",
+    (outcome) => outcome.action === "inserted" || outcome.action === "refreshed",
   );
   if (!touched) {
-    const anyPresent = outcomes.some((o) => o.action !== "missing");
+    const anyPresent = outcomes.some((outcome) => outcome.action !== "missing");
     if (!anyPresent) {
       deps.write(
         "\n  (no CLAUDE.md or AGENTS.md found — create one to opt in)\n",

@@ -44,9 +44,9 @@ export function parseClaudeStyleInput(text: string): NormalizedHookInput {
   const files: string[] = [];
   const ti = obj.tool_input ?? {};
 
-  function pushIfPath(v: unknown): void {
-    if (typeof v === "string" && v.length > 0 && !files.includes(v)) {
-      files.push(v);
+  function pushIfPath(value: unknown): void {
+    if (typeof value === "string" && value.length > 0 && !files.includes(value)) {
+      files.push(value);
     }
   }
 
@@ -75,8 +75,8 @@ export function parseClaudeStyleInput(text: string): NormalizedHookInput {
 export function parseLineDelimitedInput(text: string): NormalizedHookInput {
   const files = text
     .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
   return {
     toolName: null,
     files,

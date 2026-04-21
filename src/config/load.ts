@@ -195,7 +195,7 @@ export async function loadConfig(
   if (!sourcePath) {
     throw new ConfigNotFoundError(
       cwd,
-      CONFIG_CANDIDATES.map((c) => path.join(cwd, c)),
+      CONFIG_CANDIDATES.map((candidate) => path.join(cwd, candidate)),
     );
   }
 

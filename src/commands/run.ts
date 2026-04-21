@@ -340,10 +340,12 @@ async function executeResolvedTarget(
       resolverImpl,
     );
     pipelineEnv = resolvedEnv.env;
-    const meaningful = resolvedEnv.sources.filter((s) => s.kind !== "process");
+    const meaningful = resolvedEnv.sources.filter(
+      (source) => source.kind !== "process",
+    );
     if (meaningful.length > 0) {
       const summary = meaningful
-        .map((s) => `${s.kind}(${String(s.keysApplied)})`)
+        .map((source) => `${source.kind}(${String(source.keysApplied)})`)
         .join(" ");
       deps.write(`  ↳ env: ${summary}\n`);
     }
@@ -814,12 +816,12 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
       const stderrPromise = streamToText(proc.stderr);
       const { exitCode, timedOut } = await runWithTimeout(proc);
       const graceMs = 500;
-      const raceGrace = (p: Promise<string>): Promise<string> =>
+      const raceGrace = (promise: Promise<string>): Promise<string> =>
         Promise.race([
-          p,
+          promise,
           new Promise<string>((resolve) => {
-            const t = setTimeout(() => resolve(""), graceMs);
-            (t as unknown as { unref?: () => void }).unref?.();
+            const timer = setTimeout(() => resolve(""), graceMs);
+            (timer as unknown as { unref?: () => void }).unref?.();
           }),
         ]);
       const [stdoutText, stderrText] = timedOut
@@ -846,8 +848,8 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
 function commaSplit(value: string): string[] {
   return value
     .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .map((stepName) => stepName.trim())
+    .filter((stepName) => stepName.length > 0);
 }
 
 interface RegisterOptions {
@@ -909,7 +911,7 @@ function addRunnerOptions(
       "--workspace <selector>",
       "workspace basename or relative path to target",
     )
-    .option("-j, --jobs <n>", "parallelism cap", (v) => parseInt(v, 10))
+    .option("-j, --jobs <n>", "parallelism cap", (value) => parseInt(value, 10))
     .option(
       "--force-gates",
       "bypass change-gates and run every step regardless",

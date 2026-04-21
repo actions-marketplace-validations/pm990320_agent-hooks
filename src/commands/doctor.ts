@@ -66,20 +66,20 @@ interface DoctorState {
 };
 
 interface DefaultHookFs {
-  readonly exists: (p: string) => Promise<boolean>;
-  readonly read: (p: string) => Promise<string>;
-  readonly write: (p: string, contents: string, mode: number) => Promise<void>;
-  readonly mkdirRecursive: (p: string) => Promise<void>;
+  readonly exists: (filePath: string) => Promise<boolean>;
+  readonly read: (filePath: string) => Promise<string>;
+  readonly write: (filePath: string, contents: string, mode: number) => Promise<void>;
+  readonly mkdirRecursive: (dirPath: string) => Promise<void>;
 }
 
 const DEFAULT_HOOK_FILEMODE = 0o644;
 
 function makeDefaultAgentFs(fs: DefaultHookFs): AgentFs {
   return {
-    exists: (p) => fs.exists(p),
-    read: (p) => fs.read(p),
-    write: (p, contents) => fs.write(p, contents, DEFAULT_HOOK_FILEMODE),
-    mkdirRecursive: (p) => fs.mkdirRecursive(p),
+    exists: (filePath) => fs.exists(filePath),
+    read: (filePath) => fs.read(filePath),
+    write: (filePath, contents) => fs.write(filePath, contents, DEFAULT_HOOK_FILEMODE),
+    mkdirRecursive: (dirPath) => fs.mkdirRecursive(dirPath),
   };
 }
 
@@ -91,18 +91,18 @@ function expectedHooks(config: Config): string[] {
     .sort();
 }
 
-async function fileExistsAt(p: string): Promise<boolean> {
+async function fileExistsAt(filePath: string): Promise<boolean> {
   try {
-    await fs.access(p);
+    await fs.access(filePath);
     return true;
   } catch {
     return false;
   }
 }
 
-async function readJsonObject(p: string): Promise<Record<string, unknown> | null> {
+async function readJsonObject(filePath: string): Promise<Record<string, unknown> | null> {
   try {
-    const text = await fs.readFile(p, "utf8");
+    const text = await fs.readFile(filePath, "utf8");
     return JSON.parse(text) as Record<string, unknown>;
   } catch {
     return null;
@@ -151,14 +151,14 @@ async function inspectGitHooks(
   const statuses: GitStatusEntry[] = [];
 
   for (const hook of hooks) {
-    const p = path.join(gitRoot, ".git", "hooks", hook);
-    const exists = await fs.exists(p);
+    const hookPath = path.join(gitRoot, ".git", "hooks", hook);
+    const exists = await fs.exists(hookPath);
     if (!exists) {
       statuses.push({ hook, status: "missing" });
       continue;
     }
     try {
-      const raw = await fs.read(p);
+      const raw = await fs.read(hookPath);
       const inspected = inspectStub(raw);
       if (!inspected.managed) {
         statuses.push({ hook, status: "foreign" });
@@ -368,10 +368,11 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const homeDir = deps.homeDir ?? os.homedir();
   const agentFs = deps.agentFs ??
     makeDefaultAgentFs({
-      exists: (p) => defaultHookFs.exists(p),
-      read: (p) => defaultHookFs.read(p),
-      write: (p, c) => defaultHookFs.write(p, c, DEFAULT_HOOK_FILEMODE),
-      mkdirRecursive: (p) => defaultHookFs.mkdirRecursive(p),
+      exists: (filePath) => defaultHookFs.exists(filePath),
+      read: (filePath) => defaultHookFs.read(filePath),
+      write: (filePath, contents) =>
+        defaultHookFs.write(filePath, contents, DEFAULT_HOOK_FILEMODE),
+      mkdirRecursive: (dirPath) => defaultHookFs.mkdirRecursive(dirPath),
     });
   const handlers = deps.agentHandlers ?? AGENT_HANDLERS;
   const detectPlaywright = deps.detectPlaywright ?? detectPlaywrightDefault;
@@ -458,7 +459,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       const decision = await evaluatePreflight(step, target.cwd, resolver);
       if (decision.ok) continue;
       const policy = resolvePreflightPolicy(step, "manual");
-      const reasons = decision.failures.map((f) => f.reason).join("; ");
+      const reasons = decision.failures.map((failure) => failure.reason).join("; ");
       const scopedStep = target.label ? `${target.label}:${stepName}` : stepName;
       if (policy === "fail") {
         preflightOk = false;
@@ -489,7 +490,7 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       },
       envResolver,
     );
-    const meaningful = resolvedEnv.sources.filter((s) => s.kind !== "process");
+    const meaningful = resolvedEnv.sources.filter((source) => source.kind !== "process");
     if (meaningful.length === 0) {
       deps.write(`✓ Environment: no auto-resolution layers fired\n`);
     } else {
@@ -513,22 +514,22 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     const amFs: AgentsMdFs =
       deps.agentsMdFs ??
       ({
-        exists: async (p) => {
+        exists: async (filePath) => {
           try {
-            await fs.access(p);
+            await fs.access(filePath);
             return true;
           } catch {
             return false;
           }
         },
-        read: (p) => fs.readFile(p, "utf8"),
-        write: (p, contents) => fs.writeFile(p, contents, "utf8"),
+        read: (filePath) => fs.readFile(filePath, "utf8"),
+        write: (filePath, contents) => fs.writeFile(filePath, contents, "utf8"),
       } satisfies AgentsMdFs);
     const entries = await statusAgentsMdBlock({
       cwd: repoCwd,
       fs: amFs,
     });
-    const interesting = entries.filter((e) => e.exists);
+    const interesting = entries.filter((entry) => entry.exists);
     if (interesting.length > 0) {
       deps.write("agent-hooks instructions:\n");
       for (const entry of interesting) {
@@ -597,10 +598,11 @@ export const defaultDoctorDeps: Omit<DoctorDeps, "cwd"> = {
   hookFs: defaultHookFs,
   homeDir: os.homedir(),
   agentFs: makeDefaultAgentFs({
-    exists: (p) => defaultHookFs.exists(p),
-    read: (p) => defaultHookFs.read(p),
-    write: (p, c) => defaultHookFs.write(p, c, DEFAULT_HOOK_FILEMODE),
-    mkdirRecursive: (p) => defaultHookFs.mkdirRecursive(p),
+    exists: (filePath) => defaultHookFs.exists(filePath),
+    read: (filePath) => defaultHookFs.read(filePath),
+    write: (filePath, contents) =>
+      defaultHookFs.write(filePath, contents, DEFAULT_HOOK_FILEMODE),
+    mkdirRecursive: (dirPath) => defaultHookFs.mkdirRecursive(dirPath),
   }),
   agentHandlers: AGENT_HANDLERS,
   detectPlaywright: detectPlaywrightDefault,

@@ -40,46 +40,58 @@ export interface DiffLine {
  * config files; we're not diffing 10k-line monsters here.
  */
 export function diffLines(oldText: string, newText: string): DiffLine[] {
-  const a = splitLines(oldText);
-  const b = splitLines(newText);
-  const m = a.length;
-  const n = b.length;
-  // lcs[i][j] = length of LCS of a[0..i) and b[0..j).
-  const lcs: number[][] = Array.from({ length: m + 1 }, () =>
-    new Array<number>(n + 1).fill(0),
+  const oldLines = splitLines(oldText);
+  const newLines = splitLines(newText);
+  const oldCount = oldLines.length;
+  const newCount = newLines.length;
+  // lcs[oldIndex][newIndex] = length of LCS of oldLines[0..oldIndex)
+  // and newLines[0..newIndex).
+  const lcs: number[][] = Array.from({ length: oldCount + 1 }, () =>
+    new Array<number>(newCount + 1).fill(0),
   );
-  for (let i = 0; i < m; i++) {
-    for (let j = 0; j < n; j++) {
-      const row = lcs[i + 1]!;
-      const prevRow = lcs[i]!;
-      if (a[i] === b[j]) {
-        row[j + 1] = (prevRow[j] ?? 0) + 1;
+  for (let oldIndex = 0; oldIndex < oldCount; oldIndex += 1) {
+    for (let newIndex = 0; newIndex < newCount; newIndex += 1) {
+      const currentRow = lcs[oldIndex + 1];
+      const previousRow = lcs[oldIndex];
+      if (!currentRow || !previousRow) continue;
+      if (oldLines[oldIndex] === newLines[newIndex]) {
+        currentRow[newIndex + 1] = (previousRow[newIndex] ?? 0) + 1;
       } else {
-        row[j + 1] = Math.max(prevRow[j + 1] ?? 0, row[j] ?? 0);
+        currentRow[newIndex + 1] = Math.max(
+          previousRow[newIndex + 1] ?? 0,
+          currentRow[newIndex] ?? 0,
+        );
       }
     }
   }
   const out: DiffLine[] = [];
-  let i = m;
-  let j = n;
-  while (i > 0 && j > 0) {
-    if (a[i - 1] === b[j - 1]) {
-      out.push({ kind: "equal", text: a[i - 1]! });
-      i--;
-      j--;
-    } else if ((lcs[i - 1]?.[j] ?? 0) >= (lcs[i]?.[j - 1] ?? 0)) {
-      out.push({ kind: "remove", text: a[i - 1]! });
-      i--;
+  let oldIndex = oldCount;
+  let newIndex = newCount;
+  while (oldIndex > 0 && newIndex > 0) {
+    const oldLine = oldLines[oldIndex - 1] ?? "";
+    const newLine = newLines[newIndex - 1] ?? "";
+    if (oldLine === newLine) {
+      out.push({ kind: "equal", text: oldLine });
+      oldIndex -= 1;
+      newIndex -= 1;
+    } else if (
+      (lcs[oldIndex - 1]?.[newIndex] ?? 0) >=
+      (lcs[oldIndex]?.[newIndex - 1] ?? 0)
+    ) {
+      out.push({ kind: "remove", text: oldLine });
+      oldIndex -= 1;
     } else {
-      out.push({ kind: "add", text: b[j - 1]! });
-      j--;
+      out.push({ kind: "add", text: newLine });
+      newIndex -= 1;
     }
   }
-  while (i > 0) {
-    out.push({ kind: "remove", text: a[--i]! });
+  while (oldIndex > 0) {
+    oldIndex -= 1;
+    out.push({ kind: "remove", text: oldLines[oldIndex] ?? "" });
   }
-  while (j > 0) {
-    out.push({ kind: "add", text: b[--j]! });
+  while (newIndex > 0) {
+    newIndex -= 1;
+    out.push({ kind: "add", text: newLines[newIndex] ?? "" });
   }
   return out.reverse();
 }

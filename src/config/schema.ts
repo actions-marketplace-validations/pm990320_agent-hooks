@@ -17,9 +17,13 @@ const RunVariants = z
     files: NonEmptyString.optional(),
     project: NonEmptyString.optional(),
   })
-  .refine((v) => v.files !== undefined || v.project !== undefined, {
+  .refine(
+    (variants) =>
+      variants.files !== undefined || variants.project !== undefined,
+    {
     message: "run: object form must define at least one of `files` or `project`",
-  });
+    },
+  );
 
 const Run = z.union([NonEmptyString, RunVariants]);
 

@@ -383,8 +383,8 @@ export async function runFixCommand(
 function commaSplit(value: string): string[] {
   return value
     .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .map((stepName) => stepName.trim())
+    .filter((stepName) => stepName.length > 0);
 }
 
 export function registerFixCommand(

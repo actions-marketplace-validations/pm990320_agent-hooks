@@ -55,8 +55,8 @@ export function parseCommitMessageSkips(message: string): {
     matches.push(match[0]);
     const tokens = (match[1] ?? "")
       .split(/[,\s]+/)
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0);
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
     for (const token of tokens) {
       if (ALL_SKIP_TOKENS.has(token.toLowerCase())) {
         skipAll = true;
@@ -70,8 +70,8 @@ export function parseCommitMessageSkips(message: string): {
     matches.push(match[0]);
     const tokens = (match[1] ?? "")
       .split(/[,\s]+/)
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0);
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
     if (tokens.length === 0) {
       // Bare [agent-hooks skip] = skip everything
       skipAll = true;
@@ -106,8 +106,8 @@ export function parseSkipEnvValue(value: string): {
   }
   const parts = trimmed
     .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .map((stepName) => stepName.trim())
+    .filter((stepName) => stepName.length > 0);
   return { skip: new Set(parts), skipAll: false };
 }
 
@@ -163,8 +163,8 @@ export function resolveSkipDirectives(
   if (typeof envOnlyRaw === "string" && envOnlyRaw.length > 0) {
     for (const name of envOnlyRaw
       .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)) {
+      .map((stepName) => stepName.trim())
+      .filter((stepName) => stepName.length > 0)) {
       only.add(name);
       sources.push({
         directive: `only ${name}`,

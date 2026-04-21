@@ -31,9 +31,9 @@ export const DETECTORS: readonly Detector[] = [
 ];
 
 export function getDetector(name: string): Detector | null {
-  return DETECTORS.find((d) => d.name === name) ?? null;
+  return DETECTORS.find((detector) => detector.name === name) ?? null;
 }
 
 export function listDetectorNames(): readonly string[] {
-  return DETECTORS.map((d) => d.name);
+  return DETECTORS.map((detector) => detector.name);
 }

@@ -145,14 +145,18 @@ function workspaceWarnings(
   cwdRel: string | null,
 ): string[] {
   const warnings: string[] = [];
-  const sorted = [...workspaces].sort((a, b) =>
-    a.relativePath.localeCompare(b.relativePath),
+  const sorted = [...workspaces].sort((left, right) =>
+    left.relativePath.localeCompare(right.relativePath),
   );
-  for (let i = 0; i < sorted.length; i += 1) {
-    const left = sorted[i];
+  for (let outerIndex = 0; outerIndex < sorted.length; outerIndex += 1) {
+    const left = sorted[outerIndex];
     if (!left) continue;
-    for (let j = i + 1; j < sorted.length; j += 1) {
-      const right = sorted[j];
+    for (
+      let innerIndex = outerIndex + 1;
+      innerIndex < sorted.length;
+      innerIndex += 1
+    ) {
+      const right = sorted[innerIndex];
       if (!right) continue;
       if (isSameOrChildPath(left.relativePath, right.relativePath)) {
         warnings.push(
@@ -184,7 +188,10 @@ function pickCurrentWorkspace(
   if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
   const matches = workspaces
     .filter((workspace) => isSameOrChildPath(workspace.relativePath, rel))
-    .sort((a, b) => pathDepth(a.relativePath) - pathDepth(b.relativePath));
+    .sort(
+      (left, right) =>
+        pathDepth(left.relativePath) - pathDepth(right.relativePath),
+    );
   return matches[0] ?? null;
 }
 
@@ -228,7 +235,7 @@ async function discoverWorkspaceRoots(
       if (matches(relDir)) found.add(relDir);
     }
   }
-  return [...found].sort((a, b) => a.localeCompare(b));
+  return [...found].sort((left, right) => left.localeCompare(right));
 }
 
 export async function loadProjectConfig(
