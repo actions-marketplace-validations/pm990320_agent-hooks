@@ -1,0 +1,12 @@
+name: monorepo-root
+workspaces:
+  - services/*
+monorepo:
+  run-workspace-selection-default: affected
+steps:
+  lint:
+    run: bash scripts/root-lint.sh {files}
+    files: "shared/**/*.txt"
+pipelines:
+  ci:
+    steps: [lint]

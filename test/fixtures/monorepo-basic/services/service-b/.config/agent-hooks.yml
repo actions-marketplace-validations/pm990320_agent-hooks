@@ -1,0 +1,8 @@
+name: service-b
+steps:
+  lint:
+    run: bash scripts/lint.sh {files}
+    files: "src/**/*.txt"
+pipelines:
+  ci:
+    steps: [lint]

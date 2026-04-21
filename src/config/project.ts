@@ -199,7 +199,9 @@ export function resolveWorkspaceSelector(
   if (byPath) return { status: "ok", workspace: byPath };
   const byBase = workspaces.filter((workspace) => workspace.basename === normalized);
   if (byBase.length === 1) {
-    return { status: "ok", workspace: byBase[0]! };
+    const workspace = byBase[0];
+    if (!workspace) return { status: "missing" };
+    return { status: "ok", workspace };
   }
   if (byBase.length > 1) {
     return { status: "ambiguous", matches: byBase };

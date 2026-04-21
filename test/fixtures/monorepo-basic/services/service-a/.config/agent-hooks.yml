@@ -1,0 +1,12 @@
+name: service-a
+steps:
+  lint:
+    run: bash scripts/lint.sh {files}
+    fix: bash scripts/fix.sh {files}
+    files: "src/**/*.txt"
+  tidy:
+    run: bash scripts/tidy.sh {files}
+    files: "src/**/*.txt"
+pipelines:
+  ci:
+    steps: [lint]
