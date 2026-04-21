@@ -82,3 +82,22 @@ agents:
 ```
 
 First matching rule wins. Matchers are regex over the tool name.
+
+## Monorepos
+
+In monorepo mode, Claude still calls one repo-level command:
+
+```json
+{ "type": "command", "command": "agent-hooks hook claude PostToolUse" }
+```
+
+agent-hooks then:
+
+- loads the parent root manifest
+- runs any matching root Claude hook rule
+- routes edited files to affected workspaces
+- runs each affected workspace's own `agents.claude-code.hooks.*` rule
+
+So a Claude edit touching `services/api/**` runs with service-relative
+paths inside that workspace config, even when Claude was launched from
+the repo root.

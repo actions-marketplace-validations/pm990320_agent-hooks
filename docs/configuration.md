@@ -33,12 +33,79 @@ agent-hooks schema > schema.json
 | `name` | string | Project name for display in reports |
 | `steps` | map | Named steps — reusable units of work |
 | `pipelines` | map | Named pipelines — ordered/parallel groups of steps |
+| `workspaces` | string[] | Root-only workspace manifest that activates coordinated monorepo mode |
+| `monorepo` | object | Root-only monorepo coordination settings |
 | `git` | object | Git hook installer settings (see below) |
 | `beads` | object | Beads integration settings |
 | `agents` | map | Per-agent hook → pipeline mapping |
 | `env` | map | Extra env vars applied to every step |
 | `install` | object | Postinstall wiring preferences (see below) |
 | `doctor` | object | Doctor output suppression |
+
+## Monorepo activation
+
+Monorepo mode is opt-in and requires a root config with `workspaces:`.
+
+```yaml
+workspaces:
+  - services/*
+  - packages/*
+```
+
+Without `workspaces:`, agent-hooks stays in single-config mode.
+
+When `workspaces:` is present:
+
+- the root config is the required coordination manifest
+- each matched workspace may own a full config of its own
+- root-owned targets and workspace-owned targets are **not** merged
+- paths inside a workspace config are relative to that workspace root
+- root + workspace local overrides are both supported, but only within
+  their own config layer
+
+See [monorepo.md](./monorepo.md) for the full behavior model.
+
+## `workspaces`
+
+Root-only. Each entry is a repo-relative explicit path or glob.
+
+```yaml
+workspaces:
+  - services/*
+  - tools/release
+```
+
+Matched directories are expected to contain a normal agent-hooks config,
+for example `.config/agent-hooks.yml`.
+
+If workspace patterns overlap, agent-hooks chooses the **shallowest**
+match and emits a warning.
+
+## `monorepo`
+
+Root-only coordination settings.
+
+```yaml
+monorepo:
+  run-workspace-selection-default: affected
+```
+
+### `run-workspace-selection-default`
+
+Controls which workspaces `agent-hooks run <target>` selects from the
+repo root (or from a workspace subdirectory when a parent root manifest
+exists).
+
+Allowed values:
+
+- `affected` *(default)* — select only workspaces affected by the chosen
+  file scope (`--files`, `--changed`, `--staged`, `--all`)
+- `all` — select every workspace that defines the target
+
+This setting affects `run` and the shortcut commands (`lint`, `test`,
+`build`, etc.). It does **not** change `ci` semantics: `ci` means
+whole-monorepo CI and runs root `ci` plus every workspace `ci` target
+that exists.
 
 ## `install`
 

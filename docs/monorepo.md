@@ -390,6 +390,56 @@ This keeps migration incremental:
 3. keep root-only targets where they still make sense
 4. adopt selectors and coordinated hooks as needed
 
+## Migration from a single-config repo
+
+Starting point:
+
+```text
+repo/
+  .config/agent-hooks.yml
+```
+
+Typical migration:
+
+1. Keep the existing root config, add `workspaces:`, and keep any
+   genuinely repo-wide targets there
+2. Create per-service configs under each workspace root
+3. Move service-specific steps/pipelines/hooks into those service configs
+4. Rewrite service-owned `files:` globs so they are relative to the
+   service root, not the repo root
+5. Re-run:
+   - `agent-hooks list`
+   - `agent-hooks doctor`
+   - `agent-hooks ci`
+6. Reinstall repo-root git hooks with:
+
+```bash
+agent-hooks install
+```
+
+### Example
+
+Before:
+
+```yaml
+steps:
+  lint-api:
+    run: bun run lint {files}
+    files: services/api/src/**/*.{ts,tsx}
+```
+
+After, in `services/api/.config/agent-hooks.yml`:
+
+```yaml
+steps:
+  lint:
+    run: bun run lint {files}
+    files: src/**/*.{ts,tsx}
+```
+
+The command stayed the same. Only the path semantics changed to become
+service-relative.
+
 ## Example shape
 
 ```text
