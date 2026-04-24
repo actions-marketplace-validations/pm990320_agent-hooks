@@ -18,6 +18,7 @@ export interface PipelineOptions {
   /** True when the caller asked for a project-scope run (e.g. `--all`). */
   readonly projectForced?: boolean;
   readonly cwd: string;
+  readonly repoRoot?: string;
   readonly env?: Record<string, string>;
   /** Step names to skip. Overrides pipeline tag filters. */
   readonly skip?: ReadonlySet<string>;
@@ -264,6 +265,7 @@ async function runOneStep(
       files: filtered,
       projectForced: options.projectForced ?? false,
       cwd: options.cwd,
+      ...(options.repoRoot ? { repoRoot: options.repoRoot } : {}),
       output: outputMode,
       ...(options.env ? { env: options.env } : {}),
     },
@@ -294,7 +296,11 @@ async function runSequentially(
     // memory pressure from buffering long output.
     const outcome = await runOneStep(entry, options, exec, "inherit");
     outcomes.push(outcome);
-    if (!continueOnError && outcome.result && outcome.result.exitCode !== 0) {
+    if (
+      !continueOnError &&
+      outcome.result?.status === "failed" &&
+      outcome.result.exitCode !== 0
+    ) {
       // Stop on first failure.
       return outcomes;
     }
@@ -372,6 +378,7 @@ export async function runPipeline(
 
   const exitCode = ordered.reduce((max, outcome) => {
     if (outcome.kind !== "ran" || !outcome.result) return max;
+    if (outcome.result.status !== "failed") return max;
     return Math.max(max, outcome.result.exitCode);
   }, 0);
 

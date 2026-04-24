@@ -33,6 +33,9 @@ describe("registry", () => {
     expect(names).toContain("rust");
     expect(names).toContain("go");
     expect(names).toContain("deno");
+    expect(names).toContain("terraform");
+    expect(names).toContain("helm");
+    expect(names).toContain("kube-linter");
   });
 
   test("getDetector returns the detector by name", () => {

@@ -16,7 +16,8 @@ whether to try it; this is for people using it.
 - [Pipelines and steps](./pipelines-and-steps.md) — the execution
   model, scopes, invocation modes, and parallelism
 - [Stack detection](./stack-detection.md) — auto-detected templates
-  for bun, npm/pnpm/yarn, uv/poetry, cargo, go, deno, terraform
+  for bun, npm/pnpm/yarn, uv/poetry, cargo, go, deno, terraform,
+  Helm, and KubeLinter
 - [Testing](./testing.md) — area maps for E2E, step tags, and how to
   keep long-running suites out of the fast feedback loop
 - [Agent integration](./agent-integration.md) — Claude Code, Codex,

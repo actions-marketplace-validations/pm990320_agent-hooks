@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { StepSchema, type Step } from "../../src/config/schema.ts";
 import {
   DEFAULT_CHUNK_BYTES,
@@ -87,6 +90,7 @@ describe("joinFiles / joinFilesNewline / joinFilesBrace", () => {
 describe("applyTemplate", () => {
   const baseCtx = {
     cwd: "/repo",
+    repoRoot: "/repo-root",
     env: { NODE_ENV: "development", MY_VAR: "hi" },
     files: ["a.ts", "b.ts"],
   };
@@ -119,6 +123,17 @@ describe("applyTemplate", () => {
 
   test("substitutes {cwd} quoted", () => {
     expect(applyTemplate("cd {cwd}", baseCtx)).toBe("cd '/repo'");
+  });
+
+  test("substitutes {dir} and repo-root aliases", () => {
+    expect(
+      applyTemplate("tool {dir} {repo-root} {repo_root} {git_root}", {
+        ...baseCtx,
+        dir: "services/api",
+      }),
+    ).toBe(
+      "tool 'services/api' '/repo-root' '/repo-root' '/repo-root'",
+    );
   });
 
   test("substitutes {env.NAME} from the env map", () => {
@@ -375,6 +390,136 @@ describe("runStep — per-file mode", () => {
   });
 });
 
+describe("runStep — grouped directory modes", () => {
+  test("per-directory runs once per deduped parent directory", async () => {
+    const step = parseStep({
+      run: "terraform -chdir={dir} validate {files}",
+      invocation: "per-directory",
+      "dir-from": "parent",
+    });
+    const { calls, exec } = recordExec();
+    const result = await runStep(
+      baseOpts({
+        step,
+        files: [
+          "infra/dev/main.tf",
+          "infra/dev/vars.tf",
+          "infra/prod/main.tf",
+        ],
+      }),
+      exec,
+    );
+    expect(result.status).toBe("passed");
+    expect(calls.map((call) => call.command)).toEqual([
+      "terraform -chdir='infra/dev' validate 'infra/dev/main.tf' 'infra/dev/vars.tf'",
+      "terraform -chdir='infra/prod' validate 'infra/prod/main.tf'",
+    ]);
+  });
+
+  test("per-directory respects the parallel cap", async () => {
+    const step = parseStep({
+      run: "tool {dir}",
+      invocation: "per-directory",
+      "dir-from": "parent",
+      parallel: 2,
+    });
+    let active = 0;
+    let maxActive = 0;
+    const exec: ExecFn = async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active -= 1;
+      return { exitCode: 0, durationMs: 1 };
+    };
+    await runStep(
+      baseOpts({
+        step,
+        files: ["a/1.tf", "b/1.tf", "c/1.tf", "d/1.tf"],
+      }),
+      exec,
+    );
+    expect(maxActive).toBeGreaterThan(1);
+    expect(maxActive).toBeLessThanOrEqual(2);
+  });
+
+  test("per-marker-dir walks up to the nearest accepted marker root", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hooks-marker-"));
+    try {
+      await fs.mkdir(path.join(tmp, "charts", "app", "templates"), {
+        recursive: true,
+      });
+      await fs.mkdir(
+        path.join(tmp, "charts", "app", "charts", "dep", "templates"),
+        {
+          recursive: true,
+        },
+      );
+      await fs.writeFile(path.join(tmp, "charts", "app", "Chart.yaml"), "name: app\n");
+      await fs.writeFile(
+        path.join(tmp, "charts", "app", "charts", "dep", "Chart.yaml"),
+        "name: dep\n",
+      );
+
+      const step = parseStep({
+        run: "helm lint {dir} {files}",
+        invocation: "per-marker-dir",
+        marker: "Chart.yaml",
+        "exclude-ancestors": "charts",
+      });
+      const { calls, exec } = recordExec();
+      const result = await runStep(
+        baseOpts({
+          step,
+          cwd: tmp,
+          repoRoot: tmp,
+          files: [
+            "charts/app/templates/deploy.yaml",
+            "charts/app/charts/dep/templates/sub.yaml",
+          ],
+        }),
+        exec,
+      );
+      expect(result.status).toBe("passed");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.command).toBe(
+        "helm lint 'charts/app' 'charts/app/templates/deploy.yaml' 'charts/app/charts/dep/templates/sub.yaml'",
+      );
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test("per-marker-dir skips when no marker roots are found", async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "agent-hooks-marker-"));
+    try {
+      await fs.mkdir(path.join(tmp, "charts", "app", "templates"), {
+        recursive: true,
+      });
+      const step = parseStep({
+        run: "helm lint {dir}",
+        invocation: "per-marker-dir",
+        marker: "Chart.yaml",
+      });
+      const { calls, exec } = recordExec();
+      const result = await runStep(
+        baseOpts({
+          step,
+          cwd: tmp,
+          repoRoot: tmp,
+          files: ["charts/app/templates/deploy.yaml"],
+        }),
+        exec,
+      );
+      expect(result.status).toBe("skipped");
+      expect(result.reason).toContain("marker directories");
+      expect(calls).toHaveLength(0);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 // --- runStep: stdin mode -------------------------------------------------
 
 describe("runStep — stdin mode", () => {
@@ -442,6 +587,22 @@ describe("runStep — args / xargs chunking", () => {
       baseOpts({ step, files: ["a", "b"] }),
       exec,
     );
+    expect(result.exitCode).toBe(2);
+  });
+});
+
+describe("runStep — on-failure", () => {
+  test("warn treats non-zero exit codes as informational", async () => {
+    const step = parseStep({
+      run: "check {files}",
+      "on-failure": "warn",
+    });
+    const { exec } = recordExec(2);
+    const result = await runStep(
+      baseOpts({ step, files: ["src/a.ts"] }),
+      exec,
+    );
+    expect(result.status).toBe("warned");
     expect(result.exitCode).toBe(2);
   });
 });

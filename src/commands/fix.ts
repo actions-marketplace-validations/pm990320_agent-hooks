@@ -204,6 +204,7 @@ export async function runFixCommand(
   async function runOne(
     loaded: LoadedConfig,
     cwd: string,
+    repoRoot: string,
     git: GitRunner,
     files: readonly string[],
     stepName: string,
@@ -240,6 +241,7 @@ export async function runFixCommand(
         config: built.config,
         files,
         cwd,
+        repoRoot,
         env: pipelineEnv,
         git,
         onStepStart: (info) => reporter.stepStart(info),
@@ -268,7 +270,7 @@ export async function runFixCommand(
         ...(args.explicitFiles ? { files: args.explicitFiles } : {}),
         repoRoot: deps.cwd,
       });
-      return runOne(loaded, deps.cwd, git, files.files, parsed.step);
+      return runOne(loaded, deps.cwd, deps.cwd, git, files.files, parsed.step);
     } catch (err) {
       if (err instanceof PathOutsideRepoError) {
         deps.writeErr(`✗ ${err.message}\n`);
@@ -338,6 +340,7 @@ export async function runFixCommand(
     return runOne(
       resolution.workspace,
       resolution.workspace.workspaceRoot,
+      project.repoRoot,
       rebaseGitRunner(git, resolution.workspace),
       routedWorkspace?.workspaceFiles ?? [],
       parsed.step,
@@ -350,7 +353,14 @@ export async function runFixCommand(
   if (project.root.config.steps[parsed.step]?.fix) {
     sawAny = true;
     finalCode =
-      (await runOne(project.root, project.repoRoot, git, routed.rootFiles, parsed.step)) ||
+      (await runOne(
+        project.root,
+        project.repoRoot,
+        project.repoRoot,
+        git,
+        routed.rootFiles,
+        parsed.step,
+      )) ||
       finalCode;
   }
 
@@ -363,6 +373,7 @@ export async function runFixCommand(
     const code = await runOne(
       workspace,
       workspace.workspaceRoot,
+      project.repoRoot,
       rebaseGitRunner(git, workspace),
       routedWorkspace?.workspaceFiles ?? [],
       parsed.step,

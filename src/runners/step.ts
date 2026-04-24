@@ -1,9 +1,11 @@
+import { access } from "node:fs/promises";
+import path from "node:path";
 import type { Step } from "../config/schema.ts";
 import { resolveAreas, type AreaDecision } from "./areas.ts";
 
 // --- Public API ----------------------------------------------------------
 
-export type StepStatus = "passed" | "failed" | "skipped";
+export type StepStatus = "passed" | "failed" | "warned" | "skipped";
 
 export interface StepInvocation {
   readonly command: string;
@@ -33,6 +35,7 @@ export interface StepRunOptions {
   /** True when the caller forces a project-scope run (e.g. `--all`). */
   readonly projectForced?: boolean;
   readonly cwd: string;
+  readonly repoRoot?: string;
   readonly env?: Record<string, string>;
   /** How child stdio reaches the parent. See ExecOutputMode. */
   readonly output?: ExecOutputMode;
@@ -112,9 +115,11 @@ export function joinFilesBrace(files: readonly string[]): string {
 
 export interface TemplateContext {
   readonly cwd: string;
+  readonly repoRoot: string;
   readonly env: Record<string, string>;
   readonly files: readonly string[];
   readonly file?: string;
+  readonly dir?: string;
 }
 
 /**
@@ -128,18 +133,29 @@ export interface TemplateContext {
  * metacharacters doesn't match the regex and is left alone by replace().
  */
 export function applyTemplate(template: string, ctx: TemplateContext): string {
-  return template.replace(/\{([A-Za-z_][A-Za-z0-9_.]*)\}/g, (match, key: string) => {
-    if (key === "files") return joinFiles(ctx.files);
-    if (key === "file") return ctx.file ? shellQuote(ctx.file) : "";
-    if (key === "files_newline") return joinFilesNewline(ctx.files);
-    if (key === "glob") return joinFilesBrace(ctx.files);
-    if (key === "cwd") return shellQuote(ctx.cwd);
-    if (key.startsWith("env.")) {
-      const envName = key.slice(4);
-      return ctx.env[envName] ?? "";
-    }
-    return match;
-  });
+  return template.replace(
+    /\{([A-Za-z_][A-Za-z0-9_.-]*)\}/g,
+    (match, key: string) => {
+      if (key === "files") return joinFiles(ctx.files);
+      if (key === "file") return ctx.file ? shellQuote(ctx.file) : "";
+      if (key === "dir") return ctx.dir ? shellQuote(ctx.dir) : "";
+      if (key === "files_newline") return joinFilesNewline(ctx.files);
+      if (key === "glob") return joinFilesBrace(ctx.files);
+      if (key === "cwd") return shellQuote(ctx.cwd);
+      if (
+        key === "repo-root" ||
+        key === "repo_root" ||
+        key === "git_root"
+      ) {
+        return shellQuote(ctx.repoRoot);
+      }
+      if (key.startsWith("env.")) {
+        const envName = key.slice(4);
+        return ctx.env[envName] ?? "";
+      }
+      return match;
+    },
+  );
 }
 
 // --- Command resolution --------------------------------------------------
@@ -209,6 +225,13 @@ function aggregateExitCode(invocations: readonly StepInvocation[]): number {
   return invocations.reduce((max, inv) => Math.max(max, inv.exitCode), 0);
 }
 
+interface InvocationTarget {
+  readonly files: readonly string[];
+  readonly file?: string;
+  readonly dir?: string;
+  readonly stdin?: string;
+}
+
 async function runSingle(
   command: string,
   options: StepRunOptions,
@@ -237,12 +260,15 @@ function templateCtx(
   options: StepRunOptions,
   files: readonly string[],
   file?: string,
+  dir?: string,
 ): TemplateContext {
   return {
     cwd: options.cwd,
+    repoRoot: options.repoRoot ?? options.cwd,
     env: { ...(options.env ?? {}), ...(options.step.env ?? {}) },
     files,
     ...(file !== undefined ? { file } : {}),
+    ...(dir !== undefined ? { dir } : {}),
   };
 }
 
@@ -266,18 +292,183 @@ function skipped(
 function result(
   invocations: readonly StepInvocation[],
   startedAt: number,
+  onFailure: "warn" | "fail",
   area?: AreaDecision,
   files?: readonly string[],
 ): StepResult {
   const exitCode = aggregateExitCode(invocations);
   return {
-    status: exitCode === 0 ? "passed" : "failed",
+    status:
+      exitCode === 0 ? "passed" : onFailure === "warn" ? "warned" : "failed",
     exitCode,
     invocations,
     durationMs: Date.now() - startedAt,
     ...(files ? { files } : {}),
     ...(area ? { area } : {}),
   };
+}
+
+function normalizeList(input: string | readonly string[] | undefined): string[] {
+  if (input === undefined) return [];
+  if (typeof input === "string") return [input];
+  return [...input];
+}
+
+function parentDirectory(file: string): string {
+  return path.posix.dirname(file);
+}
+
+function hasExcludedAncestor(
+  candidateDir: string,
+  excludedAncestors: readonly string[],
+): boolean {
+  if (excludedAncestors.length === 0) return false;
+  const normalized = candidateDir === "." ? [] : candidateDir.split("/");
+  const ancestorSegments = normalized.slice(1, -1);
+  return ancestorSegments.some((segment) => excludedAncestors.includes(segment));
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findMarkerDirectory(
+  cwd: string,
+  file: string,
+  markers: readonly string[],
+  excludedAncestors: readonly string[],
+): Promise<string | null> {
+  let currentDir = parentDirectory(file);
+  for (;;) {
+    const foundMarker = await Promise.any(
+      markers.map(async (marker) => {
+        const markerPath = path.join(cwd, currentDir, marker);
+        if (await pathExists(markerPath)) return marker;
+        throw new Error("missing marker");
+      }),
+    ).catch(() => null);
+    if (foundMarker !== null) {
+      if (!hasExcludedAncestor(currentDir, excludedAncestors)) {
+        return currentDir;
+      }
+    }
+    if (currentDir === ".") return null;
+    const parentDir = path.posix.dirname(currentDir);
+    if (parentDir === currentDir) return null;
+    currentDir = parentDir;
+  }
+}
+
+async function planInvocationTargets(
+  runOptions: StepRunOptions,
+  mode: Step["invocation"],
+): Promise<readonly InvocationTarget[]> {
+  if (mode === "per-file") {
+    return runOptions.files.map((file) => ({ files: [file], file }));
+  }
+
+  if (mode === "per-directory") {
+    const groups = new Map<string, string[]>();
+    for (const file of runOptions.files) {
+      const dir = parentDirectory(file);
+      const existing = groups.get(dir);
+      if (existing) existing.push(file);
+      else groups.set(dir, [file]);
+    }
+    return [...groups.entries()]
+      .sort(([leftDir], [rightDir]) => leftDir.localeCompare(rightDir))
+      .map(([dir, files]) => ({ dir, files }));
+  }
+
+  if (mode === "per-marker-dir") {
+    const groups = new Map<string, string[]>();
+    const markers = normalizeList(runOptions.step.marker);
+    const excludedAncestors = normalizeList(
+      runOptions.step["exclude-ancestors"],
+    );
+    for (const file of runOptions.files) {
+      const dir = await findMarkerDirectory(
+        runOptions.cwd,
+        file,
+        markers,
+        excludedAncestors,
+      );
+      if (!dir) continue;
+      const existing = groups.get(dir);
+      if (existing) existing.push(file);
+      else groups.set(dir, [file]);
+    }
+    return [...groups.entries()]
+      .sort(([leftDir], [rightDir]) => leftDir.localeCompare(rightDir))
+      .map(([dir, files]) => ({ dir, files }));
+  }
+
+  if (mode === "stdin") {
+    return [
+      {
+        files: runOptions.files,
+        stdin: `${runOptions.files.join("\n")}\n`,
+      },
+    ];
+  }
+
+  if (mode === "glob") {
+    return [{ files: runOptions.files }];
+  }
+
+  const maxFiles = mode === "xargs" ? runOptions.step.chunk : undefined;
+  return chunkFiles(runOptions.files, DEFAULT_CHUNK_BYTES, maxFiles).map(
+    (files) => ({ files: [...files] }),
+  );
+}
+
+async function executeTargets(
+  targets: readonly InvocationTarget[],
+  runOptions: StepRunOptions,
+  exec: ExecFn,
+  template: string,
+  mode: Step["invocation"],
+): Promise<readonly StepInvocation[]> {
+  const runTarget = async (target: InvocationTarget): Promise<StepInvocation> => {
+    const command = applyTemplate(
+      template,
+      templateCtx(runOptions, target.files, target.file, target.dir),
+    );
+    return runSingle(command, runOptions, exec, target.stdin);
+  };
+
+  if (
+    mode !== "per-file" &&
+    mode !== "per-directory" &&
+    mode !== "per-marker-dir"
+  ) {
+    const invocations: StepInvocation[] = [];
+    for (const target of targets) {
+      invocations.push(await runTarget(target));
+    }
+    return invocations;
+  }
+
+  const parallel = runOptions.step.parallel ?? 1;
+  const queue = [...targets];
+  const invocations: StepInvocation[] = [];
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const target = queue.shift();
+      if (target === undefined) return;
+      invocations.push(await runTarget(target));
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(parallel, targets.length));
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return invocations;
 }
 
 /**
@@ -293,6 +484,7 @@ export async function runStep(
   const { step } = options;
   const projectForced = options.projectForced ?? false;
   let mode = deriveEffectiveMode(step, projectForced);
+  const onFailure = step["on-failure"] ?? "fail";
 
   // Area maps rewrite the file list before mode dispatch. A matched
   // area can replace {files} with its `run` selectors; an unmatched
@@ -333,8 +525,14 @@ export async function runStep(
       );
     }
     const command = applyTemplate(template, templateCtx(runOptions, []));
-    const invocation = await runSingle(command, runOptions, exec);
-    return result([invocation], startedAt, areaDecision, effectiveFiles);
+      const invocation = await runSingle(command, runOptions, exec);
+    return result(
+      [invocation],
+      startedAt,
+      onFailure,
+      areaDecision,
+      effectiveFiles,
+    );
   }
 
   // File-scoped modes: if the list is empty, try fallback → project → skip.
@@ -342,13 +540,25 @@ export async function runStep(
     if (step.fallback) {
       const command = applyTemplate(step.fallback, templateCtx(runOptions, []));
       const invocation = await runSingle(command, runOptions, exec);
-      return result([invocation], startedAt, areaDecision, effectiveFiles);
+      return result(
+        [invocation],
+        startedAt,
+        onFailure,
+        areaDecision,
+        effectiveFiles,
+      );
     }
     const projectTemplate = pickRunVariant(step.run, "project");
     if (typeof step.run === "object" && projectTemplate !== null) {
       const command = applyTemplate(projectTemplate, templateCtx(runOptions, []));
       const invocation = await runSingle(command, runOptions, exec);
-      return result([invocation], startedAt, areaDecision, effectiveFiles);
+      return result(
+        [invocation],
+        startedAt,
+        onFailure,
+        areaDecision,
+        effectiveFiles,
+      );
     }
     return skipped("no matching files", startedAt, areaDecision, effectiveFiles);
   }
@@ -366,63 +576,20 @@ export async function runStep(
   // Pin to a string-typed constant so closures below don't lose the
   // narrowing through control-flow analysis.
   const template: string = rawTemplate;
-
-  if (mode === "per-file") {
-    const parallel = step.parallel ?? 1;
-    const invocations: StepInvocation[] = [];
-    const queue = [...runOptions.files];
-    async function worker(): Promise<void> {
-      for (;;) {
-        const file = queue.shift();
-        if (file === undefined) return;
-        const command = applyTemplate(
-          template,
-          templateCtx(runOptions, [file], file),
-        );
-        invocations.push(await runSingle(command, runOptions, exec));
-      }
-    }
-    const workerCount = Math.max(
-      1,
-      Math.min(parallel, runOptions.files.length),
+  const targets = await planInvocationTargets(runOptions, mode);
+  if (
+    (mode === "per-directory" || mode === "per-marker-dir") &&
+    targets.length === 0
+  ) {
+    return skipped(
+      mode === "per-directory"
+        ? "no directory targets resolved"
+        : "no marker directories found",
+      startedAt,
+      areaDecision,
+      effectiveFiles,
     );
-    await Promise.all(
-      Array.from({ length: workerCount }, () => worker()),
-    );
-    return result(invocations, startedAt, areaDecision, effectiveFiles);
   }
-
-  if (mode === "stdin") {
-    const command = applyTemplate(
-      template,
-      templateCtx(runOptions, runOptions.files),
-    );
-    const invocation = await runSingle(
-      command,
-      runOptions,
-      exec,
-      `${runOptions.files.join("\n")}\n`,
-    );
-    return result([invocation], startedAt, areaDecision, effectiveFiles);
-  }
-
-  if (mode === "glob") {
-    const command = applyTemplate(
-      template,
-      templateCtx(runOptions, runOptions.files),
-    );
-    const invocation = await runSingle(command, runOptions, exec);
-    return result([invocation], startedAt, areaDecision, effectiveFiles);
-  }
-
-  // args / xargs: chunking applies. xargs uses `step.chunk` as the hard
-  // upper bound; args is just byte-based.
-  const maxFiles = mode === "xargs" ? step.chunk : undefined;
-  const chunks = chunkFiles(runOptions.files, DEFAULT_CHUNK_BYTES, maxFiles);
-  const invocations: StepInvocation[] = [];
-  for (const chunk of chunks) {
-    const command = applyTemplate(template, templateCtx(runOptions, chunk));
-    invocations.push(await runSingle(command, runOptions, exec));
-  }
-  return result(invocations, startedAt, areaDecision, effectiveFiles);
+  const invocations = await executeTargets(targets, runOptions, exec, template, mode);
+  return result(invocations, startedAt, onFailure, areaDecision, effectiveFiles);
 }

@@ -56,6 +56,49 @@ steps:
 Runs once per file, substituting `{file}` (singular). Sequential by
 default; `parallel: N` bounds concurrency.
 
+### `per-directory`
+
+```yaml
+steps:
+  terraform-validate:
+    run: terraform -chdir={dir} init -backend=false && terraform -chdir={dir} validate
+    files: "**/*.tf"
+    invocation: per-directory
+    dir-from: parent
+    parallel: 4
+```
+
+Takes the matched files, derives one directory per file, dedupes the
+directories, then runs once per directory with `{dir}` substituted.
+`dir-from: parent` means "use the file's parent directory". Sequential
+by default; `parallel: N` bounds directory-level concurrency.
+
+This is the preferred shape for tools that operate on module folders
+rather than individual files, such as Terraform validation.
+
+### `per-marker-dir`
+
+```yaml
+steps:
+  helm-lint:
+    run: helm lint {dir}
+    files: "**/*.{yaml,yml}"
+    invocation: per-marker-dir
+    marker: Chart.yaml
+    exclude-ancestors: charts
+    parallel: 4
+```
+
+For each matched file, walks upward until it finds a marker file,
+dedupes the discovered roots, then runs once per root with `{dir}`
+substituted. `marker` can be a string or list, for example
+`[Chart.yaml, go.mod, package.json]`.
+
+`exclude-ancestors` skips marker roots that have a named ancestor after
+the first path segment. For Helm, `exclude-ancestors: charts` keeps the
+top-level chart root (`charts/app`) while avoiding vendored nested
+charts such as `charts/app/charts/subchart`.
+
 ### `stdin`
 
 ```yaml
@@ -127,6 +170,53 @@ syntax so agent-edit / pre-commit hooks only lint the files that
 actually changed, while CI still checks the whole project.
 
 ### Linter recipes
+
+**Terraform validate per module directory:**
+
+```yaml
+terraform-validate:
+  run: terraform -chdir={dir} init -backend=false && terraform -chdir={dir} validate
+  files: "**/*.tf"
+  invocation: per-directory
+  dir-from: parent
+  parallel: 4
+```
+
+**Helm lint per chart root:**
+
+```yaml
+helm-lint:
+  run: helm lint {dir}
+  files: "**/*.{yaml,yml}"
+  invocation: per-marker-dir
+  marker: Chart.yaml
+  exclude-ancestors: charts
+  parallel: 4
+```
+
+**KubeLinter for Kubernetes manifest directories:**
+
+```yaml
+kube-linter-manifests:
+  run: kube-linter lint {dir}
+  files: "**/*.{yaml,yml}"
+  invocation: per-directory
+  dir-from: parent
+  parallel: 4
+```
+
+KubeLinter also accepts Helm chart roots, so chart-based repos can use
+the same marker pattern:
+
+```yaml
+kube-linter-helm:
+  run: kube-linter lint {dir}
+  files: "**/*.{yaml,yml}"
+  invocation: per-marker-dir
+  marker: Chart.yaml
+  exclude-ancestors: charts
+  parallel: 4
+```
 
 **ESLint** (JavaScript / TypeScript):
 
@@ -333,10 +423,13 @@ the agent actually edited `package.json` — not on every edit.
 |---|---|---|
 | `{files}` | `args`, `xargs` | Shell-quoted, space-joined |
 | `{file}` | `per-file` | One file at a time |
+| `{dir}` | `per-directory`, `per-marker-dir` | Current grouped directory target |
 | `{files_newline}` | any | Newline-joined |
 | `{glob}` | `glob` | Minimal glob pattern |
 | `{cwd}` | any | Current working dir |
-| `{git_root}` | any | Repo root |
+| `{repo-root}` | any | Repo root |
+| `{repo_root}` | any | Repo root alias |
+| `{git_root}` | any | Repo root alias kept for compatibility |
 | `{env.NAME}` | any | Env var passthrough |
 
 ## Symlinks
@@ -371,9 +464,29 @@ are too varied to paper over.
 
 | Mode | Empty list |
 |---|---|
-| `args`, `stdin`, `xargs`, `per-file` | Skip (exit 0) unless `fallback:` defined |
+| `args`, `stdin`, `xargs`, `per-file`, `per-directory` | Skip (exit 0) unless `fallback:` defined |
+| `per-marker-dir` | Skip (exit 0) if no marker roots are found |
 | `glob` | Run with empty glob (tool decides) |
 | `project` | Always runs |
+
+## Informational failures
+
+Use `on-failure: warn` when a step should report a non-zero tool exit
+without failing the pipeline:
+
+```yaml
+steps:
+  tflint:
+    run: tflint --chdir={dir}
+    files: "**/*.tf"
+    invocation: per-directory
+    dir-from: parent
+    on-failure: warn
+```
+
+The step appears as `warned (exit N)` in output. Its command exit code
+is still recorded, but the pipeline exits successfully unless another
+step actually fails.
 
 ## Pipelines
 

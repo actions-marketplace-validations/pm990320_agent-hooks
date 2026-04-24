@@ -426,6 +426,7 @@ async function executeResolvedTarget(
       config: resolved.config,
       files,
       cwd,
+      repoRoot: prepared.repoRoot,
       env: pipelineEnv,
       git,
       ...(effectiveSkip.size > 0 ? { skip: effectiveSkip } : {}),

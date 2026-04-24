@@ -241,6 +241,7 @@ function initFsAsDetectorFs(fs: InitFs): DetectorFs {
   return {
     exists: (filePath) => fs.exists(filePath),
     read: (filePath) => fs.read(filePath),
+    list: (dir) => fs.list?.(dir) ?? Promise.resolve([]),
   };
 }
 

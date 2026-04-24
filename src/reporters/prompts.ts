@@ -69,7 +69,9 @@ export function shouldEmitPrompt(
   if (outcome.kind !== "ran") return false;
   const status = outcome.result?.status;
   if (!status || status === "skipped") return false;
-  if (policy === "failures-only") return status === "failed";
+  if (policy === "failures-only") {
+    return status === "failed" || status === "warned";
+  }
   return true;
 }
 
@@ -143,6 +145,9 @@ export function renderNextStepBlock(input: NextStepBlockInput): string {
 function summaryFor(outcome: StepOutcome): string {
   const status = outcome.result?.status;
   if (status === "passed") return "ok";
+  if (status === "warned") {
+    return `warned (exit ${String(outcome.result?.exitCode ?? 1)})`;
+  }
   if (status === "failed") {
     return `exited ${String(outcome.result?.exitCode ?? 1)}`;
   }
@@ -250,7 +255,7 @@ export async function detectPlaywrightCheckpoint(
  */
 export function defaultPromptForStep(
   step: Step,
-  status: "passed" | "failed",
+  status: "passed" | "failed" | "warned",
   options?: { readonly playwrightCheckpoint?: boolean },
 ): string {
   const tags = new Set(step.tags);
@@ -258,7 +263,9 @@ export function defaultPromptForStep(
   const checkpointAware = options?.playwrightCheckpoint ?? false;
   const bucket =
     kind === "e2e" && checkpointAware ? CHECKPOINT_E2E_PROMPTS : DEFAULT_PROMPTS[kind];
-  return status === "failed" ? bucket.failure : bucket.success;
+  return status === "failed" || status === "warned"
+    ? bucket.failure
+    : bucket.success;
 }
 
 type DefaultKind = "e2e" | "test" | "typecheck" | "lint" | "build" | "generic";

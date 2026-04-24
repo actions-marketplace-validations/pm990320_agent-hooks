@@ -32,11 +32,15 @@ const Run = z.union([NonEmptyString, RunVariants]);
 const InvocationMode = z.enum([
   "args",
   "per-file",
+  "per-directory",
+  "per-marker-dir",
   "stdin",
   "xargs",
   "glob",
   "project",
 ]);
+
+const DirFrom = z.enum(["parent"]);
 
 // --- Preflight requirements (PLAN §5.6.1) --------------------------------
 
@@ -49,6 +53,8 @@ const RequireCheck = z.union([
 ]);
 
 const OnMissing = z.enum(["warn", "warn-skip", "skip", "fail"]);
+
+const OnFailure = z.enum(["warn", "fail"]);
 
 // --- Change gates (PLAN §5.6a) -------------------------------------------
 
@@ -87,11 +93,15 @@ export const StepSchema = z
     fallback: NonEmptyString.optional(),
     scope: z.enum(["project", "files"]).optional(),
     invocation: InvocationMode.default("args"),
+    "dir-from": DirFrom.optional(),
+    marker: StringOrArray.optional(),
+    "exclude-ancestors": StringOrArray.optional(),
     chunk: z.number().int().positive().optional(),
     parallel: z.number().int().positive().optional(),
     tags: z.array(NonEmptyString).default([]),
     requires: z.array(RequireCheck).default([]),
     "on-missing": OnMissing.optional(),
+    "on-failure": OnFailure.optional(),
     artifacts: z.array(NonEmptyString).default([]),
     areas: z.record(NonEmptyString, Area).optional(),
     unmatched: Unmatched.optional(),
@@ -107,6 +117,47 @@ export const StepSchema = z
      * is surfaced in the step summary as "timed out after Xms".
      */
     "timeout-ms": z.number().int().nonnegative().default(0),
+  })
+  .superRefine((step, ctx) => {
+    if (step.invocation === "per-directory" && step["dir-from"] === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dir-from"],
+        message: "dir-from is required when invocation=per-directory",
+      });
+    }
+    if (step.invocation !== "per-directory" && step["dir-from"] !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dir-from"],
+        message: "dir-from is only supported when invocation=per-directory",
+      });
+    }
+    if (step.invocation === "per-marker-dir" && step.marker === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["marker"],
+        message: "marker is required when invocation=per-marker-dir",
+      });
+    }
+    if (step.invocation !== "per-marker-dir" && step.marker !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["marker"],
+        message: "marker is only supported when invocation=per-marker-dir",
+      });
+    }
+    if (
+      step.invocation !== "per-marker-dir" &&
+      step["exclude-ancestors"] !== undefined
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["exclude-ancestors"],
+        message:
+          "exclude-ancestors is only supported when invocation=per-marker-dir",
+      });
+    }
   })
   .strict();
 

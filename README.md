@@ -85,7 +85,7 @@ agent-hooks ci            # run the full pipeline
 ```
 
 `init` detects your stack (bun / npm / pnpm / yarn / uv / poetry /
-cargo / go / deno / terraform / …), writes a starter
+cargo / go / deno / terraform / Helm / KubeLinter / …), writes a starter
 `.config/agent-hooks.yml`, and installs shell stubs into
 `.git/hooks/<name>` that dispatch back into agent-hooks.
 

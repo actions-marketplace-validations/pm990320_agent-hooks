@@ -42,6 +42,7 @@ export interface ClaudeDispatchOptions {
   readonly input: ClaudeHookInput;
   readonly config: Config;
   readonly cwd: string;
+  readonly repoRoot?: string;
   readonly env: Record<string, string>;
   readonly git: GitRunner;
   readonly exec: ExecFn;
@@ -96,6 +97,7 @@ export async function dispatchClaudeHook(
       config: options.config,
       files: resolved.files,
       cwd: options.cwd,
+      ...(options.repoRoot ? { repoRoot: options.repoRoot } : {}),
       env: options.env,
       onStepStart: (info) => options.reporter.stepStart(info),
       onStepEnd: (outcome) => options.reporter.stepEnd(outcome),

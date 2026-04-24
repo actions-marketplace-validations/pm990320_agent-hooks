@@ -17,7 +17,18 @@ apply to one repo.
 | `rust` | `Cargo.toml` | `cargo clippy`, `cargo test`, `cargo build`, `cargo fmt --check` |
 | `go` | `go.mod` | `go vet`, `go test ./...`, `go build ./...`, `gofmt -l` |
 | `deno` | `deno.json`, `deno.lock` | `deno lint`, `deno test`, `deno check` |
-| `terraform` | `*.tf` at root | `terraform fmt -check`, `terraform validate` |
+| `terraform` | `*.tf` anywhere | `terraform fmt -check`, per-directory `terraform validate` |
+| `helm` | `Chart.yaml` anywhere | per-chart-root `helm lint`, `helm template` |
+| `kube-linter` | `.kube-linter.yaml`, Kubernetes manifests, or `Chart.yaml` | per-directory / per-chart-root `kube-linter lint` |
+
+The Terraform, Helm, and KubeLinter templates use grouped invocation
+modes:
+
+- Terraform validation uses `invocation: per-directory` with
+  `dir-from: parent` so each module directory is validated once.
+- Helm and KubeLinter chart checks use `invocation: per-marker-dir`
+  with `marker: Chart.yaml` so each chart root is linted once, while
+  vendored nested charts can be skipped with `exclude-ancestors: charts`.
 
 ## Auto-wired hooks
 

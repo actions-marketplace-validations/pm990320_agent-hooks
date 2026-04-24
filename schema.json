@@ -74,10 +74,50 @@
             "enum": [
               "args",
               "per-file",
+              "per-directory",
+              "per-marker-dir",
               "stdin",
               "xargs",
               "glob",
               "project"
+            ]
+          },
+          "dir-from": {
+            "type": "string",
+            "enum": [
+              "parent"
+            ]
+          },
+          "marker": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ]
+          },
+          "exclude-ancestors": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             ]
           },
           "chunk": {
@@ -172,6 +212,13 @@
               "warn",
               "warn-skip",
               "skip",
+              "fail"
+            ]
+          },
+          "on-failure": {
+            "type": "string",
+            "enum": [
+              "warn",
               "fail"
             ]
           },

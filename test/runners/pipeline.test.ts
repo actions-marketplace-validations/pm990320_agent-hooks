@@ -264,6 +264,44 @@ describe("runPipeline — execution", () => {
     expect(commandNames).toContain("vitest");
   });
 
+  test("warn-on-failure does not fail the pipeline or stop later steps", async () => {
+    const config = ConfigSchema.parse({
+      steps: {
+        info: {
+          run: "warn-tool {files}",
+          files: "**/*.ts",
+          "on-failure": "warn",
+        },
+        lint: {
+          run: "eslint {files}",
+          files: "**/*.ts",
+        },
+      },
+      pipelines: {
+        ci: { steps: ["info", "lint"] },
+      },
+    });
+    const { calls, exec } = recordExec((input) =>
+      input.command.startsWith("warn-tool") ? 7 : 0,
+    );
+    const result = await runPipeline(
+      {
+        pipelineName: "ci",
+        config,
+        files: ["src/a.ts"],
+        cwd: "/repo",
+      },
+      exec,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.exitCode).toBe(0);
+    expect(result.steps[0]?.result?.status).toBe("warned");
+    expect(calls.map((call) => call.command.split(" ")[0])).toEqual([
+      "warn-tool",
+      "eslint",
+    ]);
+  });
+
   test("parallel mode runs steps concurrently and preserves step order in results", async () => {
     const { exec } = recordExec();
     const result = await runPipeline(
@@ -588,6 +626,34 @@ describe("runPipeline — preflight", () => {
       exec,
     );
     expect(result.steps[0]?.kind).toBe("skipped-by-preflight");
+  });
+
+  test("requires.file + on-missing: skip skips the step when the file is absent", async () => {
+    const config = ConfigSchema.parse({
+      steps: {
+        lint: {
+          run: "echo lint",
+          requires: [{ file: ".missingrc" }],
+          "on-missing": "skip",
+        },
+      },
+      pipelines: { ci: { steps: ["lint"] } },
+    });
+    const { exec, calls } = recordExec();
+    const result = await runPipeline(
+      {
+        pipelineName: "ci",
+        config,
+        files: ["src/a.ts"],
+        cwd: "/repo",
+        preflightContext: "manual",
+        preflightResolver: memResolver({}),
+      },
+      exec,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.steps[0]?.kind).toBe("skipped-by-preflight");
+    expect(calls).toHaveLength(0);
   });
 });
 
