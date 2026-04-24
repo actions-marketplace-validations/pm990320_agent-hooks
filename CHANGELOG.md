@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.4.0](https://github.com/pm990320/agent-hooks/compare/v0.3.3...v0.4.0) (2026-04-24)
+
+
+### Features
+
+* add agent-hooks-setup skill for guided installation and configuration ([9b75bd3](https://github.com/pm990320/agent-hooks/commit/9b75bd37f3d518a749513400abe4f04e720f6d64))
+* affected-only testing — detect vitest/jest and emit two-form run ([0ef7222](https://github.com/pm990320/agent-hooks/commit/0ef7222fefeb06c7a9bcde6f7877680dcab51aa4))
+* **cli:** add monorepo install and doctor support ([4bd92f1](https://github.com/pm990320/agent-hooks/commit/4bd92f17294f6cac005a28d8eec2ce46f4160d49))
+* **config:** add monorepo project loader ([6fe172a](https://github.com/pm990320/agent-hooks/commit/6fe172a26d7684c1b2b3576d04539bd8f741cf19))
+* configurable scope on git hooks (staged | changed | all) ([43aa9fa](https://github.com/pm990320/agent-hooks/commit/43aa9fa2b2069c20ac81dcc3097bbf9c45b6e9b9))
+* **hooks:** fan out monorepo hook dispatch ([d9b898f](https://github.com/pm990320/agent-hooks/commit/d9b898f716552c2f31f663dc27502394cf20f61d))
+* **init:** add monorepo root scaffolding ([c0d1a15](https://github.com/pm990320/agent-hooks/commit/c0d1a15b10b591e051c2b7a3e91e6c27cc11a754))
+* per-file linting in node detector + linter recipes in docs ([d9f867e](https://github.com/pm990320/agent-hooks/commit/d9f867e784cbd9b5e941b2d3cef181ee9aab7f1c))
+* **run:** add monorepo target dispatch ([2da8e67](https://github.com/pm990320/agent-hooks/commit/2da8e671ed93a4f29c660a0962a6576eb52da0d0))
+* **runners:** add grouped invocation modes ([b9a5912](https://github.com/pm990320/agent-hooks/commit/b9a5912c966015a8e86eaefa1b110afbbb328a4d))
+* **runners:** add workspace path routing helpers ([673fab0](https://github.com/pm990320/agent-hooks/commit/673fab0db1b8b0a70da86211269e58835e72caed))
+* when-changed gates match pipeline input files, not git state ([25dcd7f](https://github.com/pm990320/agent-hooks/commit/25dcd7fe056769bb765b3a1ae95852ec598ef813))
+
+
+### Bug Fixes
+
+* **agent:** load skill template from packaged dist ([a1bcb6d](https://github.com/pm990320/agent-hooks/commit/a1bcb6d3f8d2ef4e9dc3d8fed9590dde95ba73c8))
+* use pull_request_target for bot PRs so CI runs without approval ([198bc1d](https://github.com/pm990320/agent-hooks/commit/198bc1d4291faeef1a51dceb0c29cacd67d763cc))
+
+
+### Reverts
+
+* remove pull_request_target (also suppressed by GITHUB_TOKEN guard) ([69c771c](https://github.com/pm990320/agent-hooks/commit/69c771ccfa6cd2dacd37c470e3cf2e0c849be3ed))
+
+
+### Documentation
+
+* add monorepo design note ([f727b10](https://github.com/pm990320/agent-hooks/commit/f727b10538710e8011f293298e19244037d9df3f))
+* expand monorepo guidance ([798907c](https://github.com/pm990320/agent-hooks/commit/798907c6492e5092a7b10ed3f00b193ab003fb5c))
+
 ## [0.3.3](https://github.com/pm990320/agent-hooks/compare/v0.3.2...v0.3.3) (2026-04-17)
 
 
