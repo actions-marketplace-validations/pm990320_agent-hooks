@@ -262,6 +262,73 @@ describe("runInitCommand — detector-driven templates", () => {
     const written = memFs.files.get("/repo/.config/agent-hooks.yml");
     expect(written).toContain("name: cool-project");
   });
+
+  test("--monorepo scaffolds a root manifest without detector templates", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/bun.lockb", "");
+    let out = "";
+    const { outcome } = await runInitCommand(
+      { monorepo: true },
+      {
+        cwd: "/repo",
+        write: (t) => {
+          out += t;
+        },
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    expect(outcome.detectors).toEqual([]);
+    const written = memFs.files.get("/repo/.config/agent-hooks.yml");
+    expect(written).toContain("workspaces:");
+    expect(written).toContain("- services/*");
+    expect(written).toContain("monorepo:");
+    expect(written).toContain("run-workspace-selection-default: affected");
+    expect(written).toContain("steps: {}");
+    expect(written).toContain("pipelines: {}");
+    expect(written).not.toContain("bun install");
+    expect(out).toContain("monorepo root scaffold");
+  });
+
+  test("monorepo prompter can opt into monorepo scaffolding interactively", async () => {
+    const memFs = mem();
+    const { outcome } = await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+        monorepoPrompter: () => Promise.resolve(true),
+      },
+    );
+    expect(outcome.detectors).toEqual([]);
+    const written = memFs.files.get("/repo/.config/agent-hooks.yml");
+    expect(written).toContain("workspaces:");
+    expect(written).toContain("steps: {}");
+  });
+
+  test("single-project init stays the default when the monorepo prompt says no", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/bun.lockb", "");
+    const { outcome } = await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+        monorepoPrompter: () => Promise.resolve(false),
+      },
+    );
+    expect(outcome.detectors).toEqual(["node-bun"]);
+    const written = memFs.files.get("/repo/.config/agent-hooks.yml");
+    expect(written).not.toContain("workspaces:");
+    expect(written).toContain("bun install");
+  });
 });
 
 describe("runInitCommand", () => {
@@ -1549,6 +1616,23 @@ describe("registerInitCommand", () => {
     });
     await program.parseAsync(["init", "--dry-run"], { from: "user" });
     expect(memFs.files.size).toBe(0);
+  });
+
+  test("parses --monorepo", async () => {
+    const program = new Command().exitOverride();
+    const memFs = mem();
+    registerInitCommand(program, {
+      cwd: "/repo",
+      write: () => {},
+      fs: memFs.initFs,
+      hookFs: memFs.hookFs,
+      postinstallFs: memFs.postinstallFs,
+    });
+    await program.parseAsync(["init", "--monorepo"], { from: "user" });
+    const written = memFs.files.get("/repo/.config/agent-hooks.yml");
+    expect(written).toContain("workspaces:");
+    expect(written).toContain("monorepo:");
+    expect(written).not.toContain("configure your linter here");
   });
 
   test("registers with default deps (smoke)", () => {

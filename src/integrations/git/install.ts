@@ -40,6 +40,8 @@ export interface InstallOptions {
   readonly gitRoot: string;
   readonly config: Config;
   readonly fs: HookFs;
+  readonly hash?: string;
+  readonly hookNames?: readonly string[];
   /**
    * How to handle a `.git/hooks/<name>` that already exists and is NOT
    * managed by agent-hooks.
@@ -104,13 +106,13 @@ async function removeOrphans(
   ];
   for (const name of knownHookNames) {
     if (expected.has(name)) continue;
-    const p = path.join(hooksDir, name);
-    if (!(await options.fs.exists(p))) continue;
-    const existing = await options.fs.read(p);
+    const hookPath = path.join(hooksDir, name);
+    if (!(await options.fs.exists(hookPath))) continue;
+    const existing = await options.fs.read(hookPath);
     const info = inspectStub(existing);
     if (info.managed) {
-      await options.fs.remove(p);
-      outcomes.push({ hookName: name, status: "removed-stale", path: p });
+      await options.fs.remove(hookPath);
+      outcomes.push({ hookName: name, status: "removed-stale", path: hookPath });
     }
   }
 }
@@ -118,55 +120,55 @@ async function removeOrphans(
 export async function installHooks(
   options: InstallOptions,
 ): Promise<InstallResult> {
-  const hash = configHash(options.config);
-  const expected = expectedHookNames(options.config);
+  const hash = options.hash ?? configHash(options.config);
+  const expected = [...(options.hookNames ?? expectedHookNames(options.config))];
   const expectedSet = new Set(expected);
   const outcomes: HookInstallOutcome[] = [];
 
   await options.fs.mkdirRecursive(path.join(options.gitRoot, ".git", "hooks"));
 
   for (const name of expected) {
-    const p = hookPath(options.gitRoot, name);
-    const exists = await options.fs.exists(p);
+    const hookFilePath = hookPath(options.gitRoot, name);
+    const exists = await options.fs.exists(hookFilePath);
 
     if (!exists) {
       if (options.ifMissing === true) {
         // Even with --if-missing, missing hooks need to be written — it
         // only short-circuits when everything is already in place.
       }
-      await options.fs.write(p, buildStub(name, hash), STUB_MODE);
-      outcomes.push({ hookName: name, status: "wrote", path: p });
+      await options.fs.write(hookFilePath, buildStub(name, hash), STUB_MODE);
+      outcomes.push({ hookName: name, status: "wrote", path: hookFilePath });
       continue;
     }
 
-    const existing = await options.fs.read(p);
+    const existing = await options.fs.read(hookFilePath);
     const info = inspectStub(existing);
 
     if (!info.managed) {
       if (options.foreignHookPolicy === "replace") {
-        await options.fs.write(p, buildStub(name, hash), STUB_MODE);
-        outcomes.push({ hookName: name, status: "replaced-foreign", path: p });
+        await options.fs.write(hookFilePath, buildStub(name, hash), STUB_MODE);
+        outcomes.push({ hookName: name, status: "replaced-foreign", path: hookFilePath });
       } else {
-        outcomes.push({ hookName: name, status: "skipped-foreign", path: p });
+        outcomes.push({ hookName: name, status: "skipped-foreign", path: hookFilePath });
       }
       continue;
     }
 
     if (info.configHash === hash) {
-      outcomes.push({ hookName: name, status: "skipped-same-hash", path: p });
+      outcomes.push({ hookName: name, status: "skipped-same-hash", path: hookFilePath });
       continue;
     }
 
-    await options.fs.write(p, buildStub(name, hash), STUB_MODE);
-    outcomes.push({ hookName: name, status: "updated", path: p });
+    await options.fs.write(hookFilePath, buildStub(name, hash), STUB_MODE);
+    outcomes.push({ hookName: name, status: "updated", path: hookFilePath });
   }
 
   await removeOrphans(options, expectedSet, outcomes);
 
   const allUpToDate = outcomes.every(
-    (o) =>
-      o.status === "skipped-same-hash" ||
-      o.status === "skipped-foreign",
+    (outcome) =>
+      outcome.status === "skipped-same-hash" ||
+      outcome.status === "skipped-foreign",
   );
 
   return { hash, outcomes, allUpToDate };
@@ -177,25 +179,25 @@ export async function installHooks(
 const nodeFs = await import("node:fs/promises");
 
 export const defaultHookFs: HookFs = {
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;
     }
   },
-  async read(p) {
-    return nodeFs.readFile(p, "utf8");
+  async read(filePath) {
+    return nodeFs.readFile(filePath, "utf8");
   },
-  async write(p, contents, mode) {
-    await nodeFs.writeFile(p, contents, "utf8");
-    await nodeFs.chmod(p, mode);
+  async write(filePath, contents, mode) {
+    await nodeFs.writeFile(filePath, contents, "utf8");
+    await nodeFs.chmod(filePath, mode);
   },
-  async mkdirRecursive(p) {
-    await nodeFs.mkdir(p, { recursive: true });
+  async mkdirRecursive(dirPath) {
+    await nodeFs.mkdir(dirPath, { recursive: true });
   },
-  async remove(p) {
-    await nodeFs.unlink(p);
+  async remove(filePath) {
+    await nodeFs.unlink(filePath);
   },
 };

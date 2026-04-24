@@ -46,10 +46,18 @@ export default tseslint.config(
     },
   },
   {
+    files: ["src/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "error",
+      "id-length": ["error", { min: 2, exceptions: ["_"] }],
+    },
+  },
+  {
     files: ["test/**/*.ts", "**/*.test.ts"],
     rules: {
       "no-console": "off",
-      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-non-null-assertion": "warn",
+      "id-length": ["warn", { min: 2, exceptions: ["_"] }],
       "@typescript-eslint/no-empty-function": "off",
       "@typescript-eslint/dot-notation": "off",
       // bun:test's expect().rejects matcher isn't typed as Thenable, which

@@ -18,6 +18,7 @@ export interface PipelineOptions {
   /** True when the caller asked for a project-scope run (e.g. `--all`). */
   readonly projectForced?: boolean;
   readonly cwd: string;
+  readonly repoRoot?: string;
   readonly env?: Record<string, string>;
   /** Step names to skip. Overrides pipeline tag filters. */
   readonly skip?: ReadonlySet<string>;
@@ -104,7 +105,7 @@ function hasAnyTag(
 ): boolean {
   if (tags.length === 0) return false;
   const tagSet = new Set(tags);
-  return step.tags.some((t) => tagSet.has(t));
+  return step.tags.some((tag) => tagSet.has(tag));
 }
 
 interface FilterResult {
@@ -167,7 +168,7 @@ export function applyFilters(
         name,
         kind: "excluded-by-tag",
         tags: step.tags,
-        reason: `matches exclude-tag (${pipeline["exclude-tags"].filter((t) => step.tags.includes(t)).join(", ")})`,
+        reason: `matches exclude-tag (${pipeline["exclude-tags"].filter((tag) => step.tags.includes(tag)).join(", ")})`,
       });
       continue;
     }
@@ -192,7 +193,7 @@ async function runOneStep(
     const decision = await evaluateGate({
       stepName: entry.name,
       step: entry.step,
-      git: options.git!,
+      git: options.git,
       cwd: options.cwd,
       inputFiles: options.files,
     });
@@ -223,7 +224,7 @@ async function runOneStep(
         entry.step,
         options.preflightContext ?? "manual",
       );
-      const reasons = decision.failures.map((f) => f.reason).join("; ");
+      const reasons = decision.failures.map((failure) => failure.reason).join("; ");
       if (policy === "fail") {
         const outcome: StepOutcome = {
           name: entry.name,
@@ -264,6 +265,7 @@ async function runOneStep(
       files: filtered,
       projectForced: options.projectForced ?? false,
       cwd: options.cwd,
+      ...(options.repoRoot ? { repoRoot: options.repoRoot } : {}),
       output: outputMode,
       ...(options.env ? { env: options.env } : {}),
     },
@@ -294,7 +296,11 @@ async function runSequentially(
     // memory pressure from buffering long output.
     const outcome = await runOneStep(entry, options, exec, "inherit");
     outcomes.push(outcome);
-    if (!continueOnError && outcome.result && outcome.result.exitCode !== 0) {
+    if (
+      !continueOnError &&
+      outcome.result?.status === "failed" &&
+      outcome.result.exitCode !== 0
+    ) {
       // Stop on first failure.
       return outcomes;
     }
@@ -328,7 +334,9 @@ async function runInParallel(
 
   const workerCount = Math.max(1, Math.min(jobs, kept.length));
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return outcomes.filter((o): o is StepOutcome => o !== undefined);
+  return outcomes.filter(
+    (outcome): outcome is StepOutcome => outcome !== undefined,
+  );
 }
 
 export async function runPipeline(
@@ -362,15 +370,16 @@ export async function runPipeline(
   // Re-order outcomes to match the original step order so summaries are
   // readable regardless of filter/parallelism.
   const byName = new Map<string, StepOutcome>();
-  for (const o of filterOutcomes) byName.set(o.name, o);
-  for (const o of runOutcomes) byName.set(o.name, o);
+  for (const outcome of filterOutcomes) byName.set(outcome.name, outcome);
+  for (const outcome of runOutcomes) byName.set(outcome.name, outcome);
   const ordered = pipeline.steps
     .map((name) => byName.get(name))
-    .filter((o): o is StepOutcome => o !== undefined);
+    .filter((outcome): outcome is StepOutcome => outcome !== undefined);
 
-  const exitCode = ordered.reduce((max, o) => {
-    if (o.kind !== "ran" || !o.result) return max;
-    return Math.max(max, o.result.exitCode);
+  const exitCode = ordered.reduce((max, outcome) => {
+    if (outcome.kind !== "ran" || !outcome.result) return max;
+    if (outcome.result.status !== "failed") return max;
+    return Math.max(max, outcome.result.exitCode);
   }, 0);
 
   return {

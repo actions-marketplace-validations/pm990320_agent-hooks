@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { ExitError } from "../cli.ts";
 import { ConfigError, ConfigNotFoundError } from "../config/errors.ts";
 import { loadConfig, type LoadedConfig } from "../config/load.ts";
+import { loadProjectConfig, type LoadedProject } from "../config/project.ts";
 import type { Config } from "../config/schema.ts";
 import { AGENT_HANDLERS } from "../hooks/registry.ts";
 import type { AgentDetection, AgentFs, AgentHandler } from "../hooks/types.ts";
@@ -9,7 +10,11 @@ import {
   statusAgentsMdBlock,
   type AgentsMdFs,
 } from "../integrations/agents-md/install.ts";
-import { configHash } from "../integrations/git/hash.ts";
+import {
+  configHash,
+  projectConfigHash,
+  projectHookNames,
+} from "../integrations/git/hash.ts";
 import {
   defaultHookFs,
   installHooks,
@@ -61,20 +66,20 @@ interface DoctorState {
 };
 
 interface DefaultHookFs {
-  readonly exists: (p: string) => Promise<boolean>;
-  readonly read: (p: string) => Promise<string>;
-  readonly write: (p: string, contents: string, mode: number) => Promise<void>;
-  readonly mkdirRecursive: (p: string) => Promise<void>;
+  readonly exists: (filePath: string) => Promise<boolean>;
+  readonly read: (filePath: string) => Promise<string>;
+  readonly write: (filePath: string, contents: string, mode: number) => Promise<void>;
+  readonly mkdirRecursive: (dirPath: string) => Promise<void>;
 }
 
 const DEFAULT_HOOK_FILEMODE = 0o644;
 
 function makeDefaultAgentFs(fs: DefaultHookFs): AgentFs {
   return {
-    exists: (p) => fs.exists(p),
-    read: (p) => fs.read(p),
-    write: (p, contents) => fs.write(p, contents, DEFAULT_HOOK_FILEMODE),
-    mkdirRecursive: (p) => fs.mkdirRecursive(p),
+    exists: (filePath) => fs.exists(filePath),
+    read: (filePath) => fs.read(filePath),
+    write: (filePath, contents) => fs.write(filePath, contents, DEFAULT_HOOK_FILEMODE),
+    mkdirRecursive: (dirPath) => fs.mkdirRecursive(dirPath),
   };
 }
 
@@ -86,18 +91,18 @@ function expectedHooks(config: Config): string[] {
     .sort();
 }
 
-async function fileExistsAt(p: string): Promise<boolean> {
+async function fileExistsAt(filePath: string): Promise<boolean> {
   try {
-    await fs.access(p);
+    await fs.access(filePath);
     return true;
   } catch {
     return false;
   }
 }
 
-async function readJsonObject(p: string): Promise<Record<string, unknown> | null> {
+async function readJsonObject(filePath: string): Promise<Record<string, unknown> | null> {
   try {
-    const text = await fs.readFile(p, "utf8");
+    const text = await fs.readFile(filePath, "utf8");
     return JSON.parse(text) as Record<string, unknown>;
   } catch {
     return null;
@@ -138,23 +143,22 @@ function classifyHookStatus(
 }
 
 async function inspectGitHooks(
-  config: Config,
+  hooks: readonly string[],
+  currentHash: string,
   gitRoot: string,
   fs: HookFs,
 ): Promise<readonly GitStatusEntry[]> {
-  const currentHash = configHash(config);
-  const hooks = expectedHooks(config);
   const statuses: GitStatusEntry[] = [];
 
   for (const hook of hooks) {
-    const p = path.join(gitRoot, ".git", "hooks", hook);
-    const exists = await fs.exists(p);
+    const hookPath = path.join(gitRoot, ".git", "hooks", hook);
+    const exists = await fs.exists(hookPath);
     if (!exists) {
       statuses.push({ hook, status: "missing" });
       continue;
     }
     try {
-      const raw = await fs.read(p);
+      const raw = await fs.read(hookPath);
       const inspected = inspectStub(raw);
       if (!inspected.managed) {
         statuses.push({ hook, status: "foreign" });
@@ -196,6 +200,45 @@ async function maybe<T>(
   }
 }
 
+function validateConfig(
+  loaded: LoadedConfig,
+  write: (text: string) => void,
+  writeErr: (text: string) => void,
+  label?: string,
+): boolean {
+  const where = label ? `${label} config` : "Config";
+  const prefix = label ? `${label}: ` : "";
+
+  write(`✓ ${where} loaded: ${loaded.sourcePath}\n`);
+  if (loaded.localPath) {
+    write(`  + local override: ${loaded.localPath}\n`);
+  }
+
+  const stepNames = Object.keys(loaded.config.steps);
+  const pipelineNames = Object.keys(loaded.config.pipelines);
+  write(
+    `✓ ${prefix}schema valid — ${String(stepNames.length)} steps, ${String(pipelineNames.length)} pipelines\n`,
+  );
+
+  const undefinedRefs: string[] = [];
+  for (const [pipeName, pipeline] of Object.entries(loaded.config.pipelines)) {
+    for (const stepName of pipeline.steps) {
+      if (!(stepName in loaded.config.steps)) {
+        undefinedRefs.push(`pipelines.${pipeName} → ${stepName}`);
+      }
+    }
+  }
+
+  if (undefinedRefs.length > 0) {
+    writeErr(`✗ ${where} references undefined steps:\n`);
+    for (const ref of undefinedRefs) writeErr(`  - ${ref}\n`);
+    return false;
+  }
+
+  write(`✓ ${prefix}all pipeline step references resolve\n`);
+  return true;
+}
+
 async function reportAgentIntegrations(
   handlers: readonly AgentHandler[],
   deps: DoctorDeps,
@@ -223,6 +266,7 @@ export interface DoctorDeps {
   readonly write: (text: string) => void;
   readonly writeErr: (text: string) => void;
   readonly load: (cwd: string) => Promise<LoadedConfig>;
+  readonly loadProject?: (cwd: string) => Promise<LoadedProject>;
   readonly gitRoot?: GitRunner;
   readonly makeGit?: (cwd: string) => GitRunner;
   readonly hookFs?: HookFs;
@@ -263,9 +307,13 @@ export interface DoctorReport {
  * environment resolution, preflight, and agent-integration checks.
  */
 export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
-  let loaded: LoadedConfig;
+  let project: LoadedProject;
   try {
-    loaded = await deps.load(deps.cwd);
+    if (deps.loadProject) {
+      project = await deps.loadProject(deps.cwd);
+    } else {
+      project = { mode: "single", loaded: await deps.load(deps.cwd) };
+    }
   } catch (err) {
     if (err instanceof ConfigNotFoundError || err instanceof ConfigError) {
       deps.writeErr(`✗ ${err.message}\n`);
@@ -275,50 +323,56 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     throw err;
   }
 
-  deps.write(`✓ Config loaded: ${loaded.sourcePath}\n`);
-  if (loaded.localPath) {
-    deps.write(`  + local override: ${loaded.localPath}\n`);
+  const repoCwd = project.mode === "monorepo" ? project.repoRoot : deps.cwd;
+  const rootConfig =
+    project.mode === "monorepo" ? project.root.config : project.loaded.config;
+
+  if (project.mode === "monorepo") {
+    deps.write(`✓ Monorepo root: ${project.root.sourcePath}\n`);
+    deps.write(`✓ Workspaces discovered: ${String(project.workspaces.length)}\n`);
+    for (const workspace of project.workspaces) {
+      deps.write(`  • ${workspace.relativePath} (${workspace.sourcePath})\n`);
+    }
+    for (const warning of project.warnings) {
+      deps.write(`  ⚠ ${warning}\n`);
+    }
+    deps.write("\n");
   }
 
-  const stepNames = Object.keys(loaded.config.steps);
-  const pipelineNames = Object.keys(loaded.config.pipelines);
-  deps.write(
-    `✓ Schema valid — ${String(stepNames.length)} steps, ${String(pipelineNames.length)} pipelines\n`,
-  );
+  const configsToValidate: { label?: string; loaded: LoadedConfig }[] =
+    project.mode === "monorepo"
+      ? [
+          { label: "root", loaded: project.root },
+          ...project.workspaces.map((workspace) => ({
+            label: `workspace ${workspace.relativePath}`,
+            loaded: workspace,
+          })),
+        ]
+      : [{ loaded: project.loaded }];
 
-  const undefinedRefs: string[] = [];
-  for (const [pipeName, pipeline] of Object.entries(loaded.config.pipelines)) {
-    for (const stepName of pipeline.steps) {
-      if (!(stepName in loaded.config.steps)) {
-        undefinedRefs.push(`pipelines.${pipeName} → ${stepName}`);
-      }
+  for (const entry of configsToValidate) {
+    if (!validateConfig(entry.loaded, deps.write, deps.writeErr, entry.label)) {
+      return { ok: false, exitCode: 2 };
     }
   }
-
-  if (undefinedRefs.length > 0) {
-    deps.writeErr(`✗ Pipelines reference undefined steps:\n`);
-    for (const ref of undefinedRefs) deps.writeErr(`  - ${ref}\n`);
-    return { ok: false, exitCode: 2 };
-  }
-
-  deps.write(`✓ All pipeline step references resolve\n`);
 
   // Determine global per-run behavior.
   const state: DoctorState = {
     suppressPlaywrightCheckpointWarning:
       deps.quiet === true ||
-      loaded.config.doctor?.suppress?.includes("playwright-checkpoint") === true,
+      rootConfig.doctor?.suppress?.includes("playwright-checkpoint") === true,
   };
   const hookFs = deps.hookFs ?? defaultHookFs;
   const gitRunner: GitRunner = deps.gitRoot ??
-    (deps.makeGit ?? createGitRunner)(deps.cwd);
+    (deps.makeGit ?? createGitRunner)(repoCwd);
   const homeDir = deps.homeDir ?? os.homedir();
   const agentFs = deps.agentFs ??
     makeDefaultAgentFs({
-      exists: (p) => defaultHookFs.exists(p),
-      read: (p) => defaultHookFs.read(p),
-      write: (p, c) => defaultHookFs.write(p, c, DEFAULT_HOOK_FILEMODE),
-      mkdirRecursive: (p) => defaultHookFs.mkdirRecursive(p),
+      exists: (filePath) => defaultHookFs.exists(filePath),
+      read: (filePath) => defaultHookFs.read(filePath),
+      write: (filePath, contents) =>
+        defaultHookFs.write(filePath, contents, DEFAULT_HOOK_FILEMODE),
+      mkdirRecursive: (dirPath) => defaultHookFs.mkdirRecursive(dirPath),
     });
   const handlers = deps.agentHandlers ?? AGENT_HANDLERS;
   const detectPlaywright = deps.detectPlaywright ?? detectPlaywrightDefault;
@@ -326,7 +380,10 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     deps.detectPlaywrightCheckpoint ?? detectPlaywrightCheckpoint;
 
   // Git-hook wiring checks: missing hooks, foreign stubs, config-hash drift.
-  const configuredHooks = expectedHooks(loaded.config);
+  const configuredHooks =
+    project.mode === "monorepo"
+      ? projectHookNames(project)
+      : expectedHooks(project.loaded.config);
   if (configuredHooks.length === 0) {
     deps.write("Git hooks: no hooks configured\n");
   } else {
@@ -337,7 +394,14 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     if (gitRoot === null) {
       deps.writeErr("⚠ Git hooks: not inside a git repository\n");
     } else {
-      const hookStatuses = await inspectGitHooks(loaded.config, gitRoot, hookFs);
+      const hookStatuses = await inspectGitHooks(
+        configuredHooks,
+        project.mode === "monorepo"
+          ? projectConfigHash(project)
+          : configHash(project.loaded.config),
+        gitRoot,
+        hookFs,
+      );
       deps.write("Git hooks:\n");
       for (const entry of hookStatuses) {
         const marker = classifyHookStatus(entry.status);
@@ -348,9 +412,15 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
       if (deps.fix === true && !allGood) {
         const result = await installHooks({
           gitRoot,
-          config: loaded.config,
+          config: project.mode === "monorepo" ? project.root.config : project.loaded.config,
           fs: hookFs,
           foreignHookPolicy: "replace",
+          ...(project.mode === "monorepo"
+            ? {
+                hash: projectConfigHash(project),
+                hookNames: configuredHooks,
+              }
+            : {}),
         });
         deps.write("  ↳ fix: applied git hook remediations\n");
         for (const outcome of result.outcomes) {
@@ -371,18 +441,32 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const resolver = deps.preflightResolver ?? defaultPreflightResolver;
   let preflightOk = true;
   let anyPreflightChecked = false;
-  for (const [stepName, step] of Object.entries(loaded.config.steps)) {
-    if (step.requires.length === 0) continue;
-    anyPreflightChecked = true;
-    const decision = await evaluatePreflight(step, deps.cwd, resolver);
-    if (decision.ok) continue;
-    const policy = resolvePreflightPolicy(step, "manual");
-    const reasons = decision.failures.map((f) => f.reason).join("; ");
-    if (policy === "fail") {
-      preflightOk = false;
-      deps.writeErr(`✗ ${stepName}: preflight failed — ${reasons}\n`);
-    } else {
-      deps.write(`  ⚠ ${stepName}: preflight (${policy}) — ${reasons}\n`);
+  const preflightTargets: { label?: string; loaded: LoadedConfig; cwd: string }[] =
+    project.mode === "monorepo"
+      ? [
+          { label: "root", loaded: project.root, cwd: project.repoRoot },
+          ...project.workspaces.map((workspace) => ({
+            label: `workspace ${workspace.relativePath}`,
+            loaded: workspace,
+            cwd: workspace.workspaceRoot,
+          })),
+        ]
+      : [{ loaded: project.loaded, cwd: deps.cwd }];
+  for (const target of preflightTargets) {
+    for (const [stepName, step] of Object.entries(target.loaded.config.steps)) {
+      if (step.requires.length === 0) continue;
+      anyPreflightChecked = true;
+      const decision = await evaluatePreflight(step, target.cwd, resolver);
+      if (decision.ok) continue;
+      const policy = resolvePreflightPolicy(step, "manual");
+      const reasons = decision.failures.map((failure) => failure.reason).join("; ");
+      const scopedStep = target.label ? `${target.label}:${stepName}` : stepName;
+      if (policy === "fail") {
+        preflightOk = false;
+        deps.writeErr(`✗ ${scopedStep}: preflight failed — ${reasons}\n`);
+      } else {
+        deps.write(`  ⚠ ${scopedStep}: preflight (${policy}) — ${reasons}\n`);
+      }
     }
   }
   if (anyPreflightChecked && preflightOk) {
@@ -400,13 +484,13 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     const baseEnv = deps.env ?? (process.env as Record<string, string>);
     const resolvedEnv = await resolveEnvironment(
       {
-        cwd: deps.cwd,
+        cwd: repoCwd,
         baseEnv,
-        ...(loaded.config.env ? { configEnv: loaded.config.env } : {}),
+        ...(rootConfig.env ? { configEnv: rootConfig.env } : {}),
       },
       envResolver,
     );
-    const meaningful = resolvedEnv.sources.filter((s) => s.kind !== "process");
+    const meaningful = resolvedEnv.sources.filter((source) => source.kind !== "process");
     if (meaningful.length === 0) {
       deps.write(`✓ Environment: no auto-resolution layers fired\n`);
     } else {
@@ -430,22 +514,22 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
     const amFs: AgentsMdFs =
       deps.agentsMdFs ??
       ({
-        exists: async (p) => {
+        exists: async (filePath) => {
           try {
-            await fs.access(p);
+            await fs.access(filePath);
             return true;
           } catch {
             return false;
           }
         },
-        read: (p) => fs.readFile(p, "utf8"),
-        write: (p, contents) => fs.writeFile(p, contents, "utf8"),
+        read: (filePath) => fs.readFile(filePath, "utf8"),
+        write: (filePath, contents) => fs.writeFile(filePath, contents, "utf8"),
       } satisfies AgentsMdFs);
     const entries = await statusAgentsMdBlock({
-      cwd: deps.cwd,
+      cwd: repoCwd,
       fs: amFs,
     });
-    const interesting = entries.filter((e) => e.exists);
+    const interesting = entries.filter((entry) => entry.exists);
     if (interesting.length > 0) {
       deps.write("agent-hooks instructions:\n");
       for (const entry of interesting) {
@@ -465,9 +549,9 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   }
 
   // Playwright / Playwright-Checkpoint integration.
-  const isPlaywright = await maybe(() => detectPlaywright(deps.cwd), false);
+  const isPlaywright = await maybe(() => detectPlaywright(repoCwd), false);
   const hasCheckpoint = await maybe(
-    () => detectPlaywrightCheckpointFn(deps.cwd),
+    () => detectPlaywrightCheckpointFn(repoCwd),
     false,
   );
   if (isPlaywright) {
@@ -507,14 +591,18 @@ export const defaultDoctorDeps: Omit<DoctorDeps, "cwd"> = {
   load: (cwd) => {
     return loadConfig({ cwd });
   },
+  loadProject: (cwd) => {
+    return loadProjectConfig({ cwd });
+  },
   makeGit: createGitRunner,
   hookFs: defaultHookFs,
   homeDir: os.homedir(),
   agentFs: makeDefaultAgentFs({
-    exists: (p) => defaultHookFs.exists(p),
-    read: (p) => defaultHookFs.read(p),
-    write: (p, c) => defaultHookFs.write(p, c, DEFAULT_HOOK_FILEMODE),
-    mkdirRecursive: (p) => defaultHookFs.mkdirRecursive(p),
+    exists: (filePath) => defaultHookFs.exists(filePath),
+    read: (filePath) => defaultHookFs.read(filePath),
+    write: (filePath, contents) =>
+      defaultHookFs.write(filePath, contents, DEFAULT_HOOK_FILEMODE),
+    mkdirRecursive: (dirPath) => defaultHookFs.mkdirRecursive(dirPath),
   }),
   agentHandlers: AGENT_HANDLERS,
   detectPlaywright: detectPlaywrightDefault,
@@ -540,6 +628,13 @@ export function registerDoctorCommand(
         write: overrides.write ?? defaultDoctorDeps.write,
         writeErr: overrides.writeErr ?? defaultDoctorDeps.writeErr,
         load: overrides.load ?? defaultDoctorDeps.load,
+        ...(
+          overrides.loadProject !== undefined
+            ? { loadProject: overrides.loadProject }
+            : overrides.load === undefined && defaultDoctorDeps.loadProject
+              ? { loadProject: defaultDoctorDeps.loadProject }
+              : {}
+        ),
         ...(overrides.preflightResolver
           ? { preflightResolver: overrides.preflightResolver }
           : {}),

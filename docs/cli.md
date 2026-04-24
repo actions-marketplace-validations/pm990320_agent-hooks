@@ -30,7 +30,7 @@ file.
 
 ```
 agent-hooks init [--force] [--dry-run]
-                 [--template <name>] [--no-templates]
+                 [--template <name>] [--no-templates] [--monorepo]
                  [--with-github-actions] [--no-github-actions]
                  [--workflow-name <file>]
                  [--with-postinstall] [--no-postinstall]
@@ -45,6 +45,9 @@ agent-hooks init [--force] [--dry-run]
   bypassing auto-detection (see `docs/stack-detection.md`)
 - `--no-templates` — skip detectors entirely and write the minimal
   fallback skeleton
+- `--monorepo` — scaffold a root monorepo manifest instead of a
+  single-repo config. In interactive mode, init can also ask whether
+  the repo is a monorepo.
 - `--with-github-actions` / `--no-github-actions` — force-on or
   force-off the `.github/workflows/agent-hooks.yml` scaffold
   (default: on iff `.github` already exists)
@@ -77,9 +80,9 @@ agent-hooks install [--if-missing]
 ```
 
 `--if-missing` is a fast no-op when every expected stub already
-exists with a managed-hash header matching the current config.
-Designed for use in `package.json` `postinstall` scripts so
-`bun install` / `npm install` stays snappy.
+exists with a managed-hash header matching the current effective
+config. In monorepo mode, that fingerprint includes the root manifest
+plus the discovered workspace hook config set.
 
 ### `ci`
 
@@ -91,6 +94,10 @@ agent-hooks ci [--jobs <n>] [--force-gates] [--skip <names>]
                [--only <names>]
 ```
 
+In monorepo mode, `ci` means "what CI would run for the whole repo":
+root `ci` plus every workspace `ci` target that exists. This is true
+whether invoked from the repo root or from a workspace subdirectory.
+
 ### `run`
 
 Run a pipeline or step with explicit file scope.
@@ -98,6 +105,7 @@ Run a pipeline or step with explicit file scope.
 ```
 agent-hooks run <target> [-f|--files <paths...>]
                          [--changed] [--staged] [-a|--all]
+                         [--workspace <selector>]
                          [--skip <names>] [--only <names>]
                          [-j|--jobs <n>] [--force-gates]
                          [--allow-outside-repo] [--no-prompts]
@@ -105,14 +113,32 @@ agent-hooks run <target> [-f|--files <paths...>]
 
 - `<target>` — pipeline or step name. If it's a step, agent-hooks
   synthesizes a one-step pipeline and runs it.
+- In monorepo mode, `<target>` may also be `workspace:target`
 - Scope flags choose the file list: `--files` (explicit) →
   `--all` → `--staged` → `--changed` (default)
+- `--workspace <selector>` — narrow execution to one workspace by
+  relative path or unique basename
 - `--skip <names>` / `--only <names>` — comma-separated step names
 - `--jobs <n>` — cap parallelism inside a parallel pipeline
 - `--force-gates` — bypass `when-changed` gates and run every step
 - `--allow-outside-repo` — allow `--files` paths that escape the
   repo root (a footgun; leave off unless you know you need it)
 - `--no-prompts` — suppress per-step `agent-hooks:next-step` blocks
+
+In monorepo mode:
+
+- `run <target>` may execute the root target, workspace targets, or both
+- workspace selection defaults to the root config's
+  `monorepo.run-workspace-selection-default`
+- missing targets in non-matching workspaces are skipped silently
+
+Examples:
+
+```bash
+agent-hooks run lint --files services/api/src/a.ts
+agent-hooks run lint --workspace api --changed
+agent-hooks run services/api:lint --all
+```
 
 ### `fix`
 
@@ -122,9 +148,13 @@ Run the step's `fix:` command if defined (see the `fix:` field in
 ```
 agent-hooks fix <step> [-f|--files <paths...>]
                        [--changed] [--staged] [-a|--all]
+                       [--workspace <selector>]
 ```
 
 Exits `2` if the step has no `fix:` command defined.
+
+In monorepo mode, `fix` supports both `--workspace <selector>` and
+`workspace:step` syntax.
 
 ### `list`
 
@@ -134,6 +164,9 @@ descriptions, tags, and whether a `fix:` command is defined.
 ```
 agent-hooks list
 ```
+
+In monorepo mode, `list` groups targets by root vs workspace and shows
+workspace discovery warnings.
 
 ### Shortcuts
 
@@ -208,6 +241,8 @@ Validate config and environment. Checks:
 4. Environment auto-resolution (direnv, mise/asdf, venv,
    `node_modules/.bin`) — lists which layers fired
 5. Known agents and whether each is currently installed
+6. In monorepo mode: root/workspace discovery, overlap warnings, and
+   repo-root git hook status for the effective config set
 
 ```
 agent-hooks doctor

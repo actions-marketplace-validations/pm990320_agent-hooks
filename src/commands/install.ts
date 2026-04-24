@@ -2,12 +2,17 @@ import type { Command } from "commander";
 import { ExitError } from "../cli.ts";
 import { ConfigError, ConfigNotFoundError } from "../config/errors.ts";
 import type { LoadedConfig } from "../config/load.ts";
+import type { LoadedProject } from "../config/project.ts";
 import {
   defaultHookFs,
   installHooks,
   type HookFs,
   type InstallResult,
 } from "../integrations/git/install.ts";
+import {
+  projectConfigHash,
+  projectHookNames,
+} from "../integrations/git/hash.ts";
 import { defaultRunDeps } from "./run.ts";
 
 export interface InstallCommandDeps {
@@ -15,6 +20,7 @@ export interface InstallCommandDeps {
   readonly write: (text: string) => void;
   readonly writeErr: (text: string) => void;
   readonly load: (cwd: string) => Promise<LoadedConfig>;
+  readonly loadProject?: (cwd: string) => Promise<LoadedProject>;
   readonly hookFs: HookFs;
 }
 
@@ -37,9 +43,13 @@ export async function runInstallCommand(
   args: InstallArgs,
   deps: InstallCommandDeps,
 ): Promise<number> {
-  let loaded: LoadedConfig;
+  let project: LoadedProject;
   try {
-    loaded = await deps.load(deps.cwd);
+    if (deps.loadProject) {
+      project = await deps.loadProject(deps.cwd);
+    } else {
+      project = { mode: "single", loaded: await deps.load(deps.cwd) };
+    }
   } catch (err) {
     if (err instanceof ConfigError || err instanceof ConfigNotFoundError) {
       deps.writeErr(`✗ ${err.message}\n`);
@@ -49,12 +59,22 @@ export async function runInstallCommand(
     throw err;
   }
 
-  const result = await installHooks({
-    gitRoot: deps.cwd,
-    config: loaded.config,
-    fs: deps.hookFs,
-    ifMissing: args.ifMissing ?? false,
-  });
+  const result =
+    project.mode === "single"
+      ? await installHooks({
+          gitRoot: deps.cwd,
+          config: project.loaded.config,
+          fs: deps.hookFs,
+          ifMissing: args.ifMissing ?? false,
+        })
+      : await installHooks({
+          gitRoot: project.repoRoot,
+          config: project.root.config,
+          fs: deps.hookFs,
+          ifMissing: args.ifMissing ?? false,
+          hash: projectConfigHash(project),
+          hookNames: projectHookNames(project),
+        });
 
   if (args.ifMissing && result.allUpToDate) {
     // Intentionally silent — postinstall scripts don't need to chatter.
@@ -65,12 +85,15 @@ export async function runInstallCommand(
   return 0;
 }
 
-export const defaultInstallDeps: Omit<InstallCommandDeps, "cwd"> = {
+export const defaultInstallDeps = {
   write: defaultRunDeps.write,
   writeErr: defaultRunDeps.writeErr,
   load: defaultRunDeps.load,
+  ...(defaultRunDeps.loadProject
+    ? { loadProject: defaultRunDeps.loadProject }
+    : {}),
   hookFs: defaultHookFs,
-};
+} satisfies Omit<InstallCommandDeps, "cwd">;
 
 export function registerInstallCommand(
   program: Command,
@@ -90,6 +113,13 @@ export function registerInstallCommand(
         write: overrides.write ?? defaultInstallDeps.write,
         writeErr: overrides.writeErr ?? defaultInstallDeps.writeErr,
         load: overrides.load ?? defaultInstallDeps.load,
+        ...(
+          overrides.loadProject !== undefined
+            ? { loadProject: overrides.loadProject }
+            : overrides.load === undefined && defaultInstallDeps.loadProject
+              ? { loadProject: defaultInstallDeps.loadProject }
+              : {}
+        ),
         hookFs: overrides.hookFs ?? defaultInstallDeps.hookFs,
       };
       const code = await runInstallCommand(

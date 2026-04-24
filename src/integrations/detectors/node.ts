@@ -16,10 +16,10 @@ export type NodePackageManager = "bun" | "pnpm" | "yarn" | "npm";
 async function readPackageJson(
   ctx: DetectorContext,
 ): Promise<Record<string, unknown> | null> {
-  const p = path.join(ctx.cwd, "package.json");
-  if (!(await ctx.fs.exists(p))) return null;
+  const packageJsonPath = path.join(ctx.cwd, "package.json");
+  if (!(await ctx.fs.exists(packageJsonPath))) return null;
   try {
-    return JSON.parse(await ctx.fs.read(p)) as Record<string, unknown>;
+    return JSON.parse(await ctx.fs.read(packageJsonPath)) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -94,10 +94,10 @@ function detectTestFramework(
  */
 function testStepFor(
   manager: NodePackageManager,
-  r: { run: string; exec: string },
+  runner: { run: string; exec: string },
   framework: TestFramework,
 ): DetectedStep {
-  const bunExec = manager === "bun" ? "bunx" : r.exec;
+  const bunExec = manager === "bun" ? "bunx" : runner.exec;
   if (framework === "vitest") {
     return {
       run: {
@@ -124,7 +124,7 @@ function testStepFor(
     run:
       manager === "bun"
         ? "bun test {files}"
-        : `${r.run} test`,
+        : `${runner.run} test`,
     files: "**/*.{ts,tsx,js,jsx}",
     tags: ["fast"],
     description: `Run tests via ${manager}`,
@@ -135,33 +135,33 @@ function nodeFragment(
   manager: NodePackageManager,
   testFramework: TestFramework = null,
 ): DetectorFragment {
-  const r = runnerFor(manager);
+  const runner = runnerFor(manager);
   return {
     steps: {
       lint: {
         run: {
-          files: `${r.exec} eslint {files}`,
-          project: `${r.exec} eslint .`,
+          files: `${runner.exec} eslint {files}`,
+          project: `${runner.exec} eslint .`,
         },
         files: "**/*.{ts,tsx,js,jsx,mjs,cjs}",
         tags: ["fast", "lint"],
         description: `Lint affected files on edit, full project on CI`,
       },
       typecheck: {
-        run: `${r.exec} tsc --noEmit`,
+        run: `${runner.exec} tsc --noEmit`,
         invocation: "project",
         tags: ["fast"],
         description: `TypeScript project check via ${manager}`,
       },
-      test: testStepFor(manager, r, testFramework),
+      test: testStepFor(manager, runner, testFramework),
       build: {
-        run: `${r.run} build`,
+        run: `${runner.run} build`,
         invocation: "project",
         tags: ["slow", "build"],
         description: `Build the project via ${manager}`,
       },
       "install-deps": {
-        run: r.install,
+        run: runner.install,
         invocation: "project",
         description: `Re-install dependencies via ${manager}`,
       },

@@ -33,12 +33,79 @@ agent-hooks schema > schema.json
 | `name` | string | Project name for display in reports |
 | `steps` | map | Named steps — reusable units of work |
 | `pipelines` | map | Named pipelines — ordered/parallel groups of steps |
+| `workspaces` | string[] | Root-only workspace manifest that activates coordinated monorepo mode |
+| `monorepo` | object | Root-only monorepo coordination settings |
 | `git` | object | Git hook installer settings (see below) |
 | `beads` | object | Beads integration settings |
 | `agents` | map | Per-agent hook → pipeline mapping |
 | `env` | map | Extra env vars applied to every step |
 | `install` | object | Postinstall wiring preferences (see below) |
 | `doctor` | object | Doctor output suppression |
+
+## Monorepo activation
+
+Monorepo mode is opt-in and requires a root config with `workspaces:`.
+
+```yaml
+workspaces:
+  - services/*
+  - packages/*
+```
+
+Without `workspaces:`, agent-hooks stays in single-config mode.
+
+When `workspaces:` is present:
+
+- the root config is the required coordination manifest
+- each matched workspace may own a full config of its own
+- root-owned targets and workspace-owned targets are **not** merged
+- paths inside a workspace config are relative to that workspace root
+- root + workspace local overrides are both supported, but only within
+  their own config layer
+
+See [monorepo.md](./monorepo.md) for the full behavior model.
+
+## `workspaces`
+
+Root-only. Each entry is a repo-relative explicit path or glob.
+
+```yaml
+workspaces:
+  - services/*
+  - tools/release
+```
+
+Matched directories are expected to contain a normal agent-hooks config,
+for example `.config/agent-hooks.yml`.
+
+If workspace patterns overlap, agent-hooks chooses the **shallowest**
+match and emits a warning.
+
+## `monorepo`
+
+Root-only coordination settings.
+
+```yaml
+monorepo:
+  run-workspace-selection-default: affected
+```
+
+### `run-workspace-selection-default`
+
+Controls which workspaces `agent-hooks run <target>` selects from the
+repo root (or from a workspace subdirectory when a parent root manifest
+exists).
+
+Allowed values:
+
+- `affected` *(default)* — select only workspaces affected by the chosen
+  file scope (`--files`, `--changed`, `--staged`, `--all`)
+- `all` — select every workspace that defines the target
+
+This setting affects `run` and the shortcut commands (`lint`, `test`,
+`build`, etc.). It does **not** change `ci` semantics: `ci` means
+whole-monorepo CI and runs root `ci` plus every workspace `ci` target
+that exists.
 
 ## `install`
 
@@ -103,10 +170,14 @@ steps:
 | `scope` | `project` \| `files` | `files` | Force the invocation scope |
 | `invocation` | enum | `args` | See [pipelines-and-steps](./pipelines-and-steps.md#invocation-modes) |
 | `chunk` | number | — | Max files per invocation (mode: `xargs`) |
-| `parallel` | number | `1` | Per-file concurrency (mode: `per-file`) |
+| `dir-from` | `parent` | — | Directory derivation rule for `invocation: per-directory` |
+| `marker` | string \| string[] | — | Marker file(s) for `invocation: per-marker-dir` |
+| `exclude-ancestors` | string \| string[] | — | Ancestor segment(s) to skip while resolving marker dirs |
+| `parallel` | number | `1` | Per-target concurrency for `per-file`, `per-directory`, and `per-marker-dir` |
 | `tags` | string[] | `[]` | Tags for pipeline include/exclude filtering |
 | `requires` | array | `[]` | Preflight checks — see [Step requires](#step-requires) |
 | `on-missing` | enum | context-dependent | What to do when `requires` fails |
+| `on-failure` | `fail` \| `warn` | `fail` | Whether a non-zero command exit fails the pipeline or is reported as informational |
 | `timeout-ms` | number | `0` | Hard timeout per step invocation (0 = unlimited). On expiry: SIGTERM, then SIGKILL after 1s, exit code 124 |
 | `artifacts` | string[] | auto | Paths to surface in the agent feedback prompt |
 | `prompts` | object | defaults | `on-success` / `on-failure` templates |
@@ -152,6 +223,39 @@ When a check fails, the step's `on-missing` policy decides whether to
 fail (`fail`), warn but still run (`warn`), warn-and-skip (`warn-skip`),
 or silently skip (`skip`). The default is `fail` for manual/CI
 invocations and `warn-skip` for git-hook and agent-hook contexts.
+
+To skip a tool when its optional config file is absent:
+
+```yaml
+steps:
+  tflint:
+    run: tflint --chdir={dir} --config {repo-root}/.tflint.hcl
+    files: "**/*.tf"
+    invocation: per-directory
+    dir-from: parent
+    requires:
+      - file: .tflint.hcl
+    on-missing: skip
+```
+
+### Step failure policy
+
+`on-failure` controls the result of a command that runs and exits
+non-zero. The default is `fail`. Set `on-failure: warn` for
+informational tools:
+
+```yaml
+steps:
+  tflint:
+    run: tflint --chdir={dir}
+    files: "**/*.tf"
+    invocation: per-directory
+    dir-from: parent
+    on-failure: warn
+```
+
+Warned steps are shown as `warned (exit N)`, but they do not make the
+pipeline fail.
 
 ### Area maps
 

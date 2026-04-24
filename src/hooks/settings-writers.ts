@@ -83,8 +83,8 @@ export function mergeClaudeStyleSettings(
     if (!entries) continue;
     const preserved = entries.filter(
       (entry) =>
-        !entry.hooks?.some((h) =>
-          h.command?.startsWith(`agent-hooks hook ${dispatchName} ${event}`),
+        !entry.hooks?.some((hook) =>
+          hook.command?.startsWith(`agent-hooks hook ${dispatchName} ${event}`),
         ),
     );
     nextHooks[event] = preserved;
@@ -138,9 +138,9 @@ export async function installClaudeStyleSettings(
   return { path: targetPath, action };
 }
 
-function dirname(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? "." : p.slice(0, i);
+function dirname(filePath: string): string {
+  const lastSlashIndex = filePath.lastIndexOf("/");
+  return lastSlashIndex === -1 ? "." : filePath.slice(0, lastSlashIndex);
 }
 
 // --- Shell stub writer ---------------------------------------------------

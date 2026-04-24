@@ -38,8 +38,10 @@ export interface GitHookDispatchOptions {
   readonly hookName: string;
   readonly config: Config;
   readonly cwd: string;
+  readonly repoRoot?: string;
   readonly env: Record<string, string>;
   readonly git: GitRunner;
+  readonly resolvedFiles?: readonly string[];
   readonly exec: ExecFn;
   readonly reporter: Reporter;
   /** Writer for operational messages (auto-staging, diagnostics). */
@@ -61,9 +63,9 @@ function noopWriter(_text: string): void {
 }
 
 const defaultBeadsFs: BeadsFs = {
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;
@@ -109,7 +111,10 @@ export async function dispatchGitHook(
   // to the hook name's default (pre-commit → staged, post-merge →
   // changed, etc.).
   const scope = rule.scope ?? scopeForGitHook(options.hookName);
-  const resolved = await resolveFiles(options.git, { scope });
+  const resolved =
+    options.resolvedFiles !== undefined
+      ? { scope, files: options.resolvedFiles }
+      : await resolveFiles(options.git, { scope });
 
   options.reporter.pipelineStart(rule.pipeline);
   const result = await runPipeline(
@@ -118,6 +123,7 @@ export async function dispatchGitHook(
       config: options.config,
       files: resolved.files,
       cwd: options.cwd,
+      ...(options.repoRoot ? { repoRoot: options.repoRoot } : {}),
       env: options.env,
       onStepStart: (info) => options.reporter.stepStart(info),
       onStepEnd: (outcome) => options.reporter.stepEnd(outcome),

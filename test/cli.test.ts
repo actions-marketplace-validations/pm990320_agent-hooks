@@ -40,11 +40,15 @@ describe("runProgram", () => {
 
   test("returns 1 when an action throws a non-CommanderError", async () => {
     const program = silentProgram();
+    let errOut = "";
     program.command("boom").action(() => {
       throw new Error("boom");
     });
-    const code = await runProgram(program, ["boom"]);
+    const code = await runProgram(program, ["boom"], (text) => {
+      errOut += text;
+    });
     expect(code).toBe(1);
+    expect(errOut).toContain("boom");
   });
 
   test("returns the ExitError's exit code when an action throws one", async () => {

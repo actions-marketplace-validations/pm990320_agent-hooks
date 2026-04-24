@@ -10,8 +10,9 @@
  * final YAML document.
  */
 export interface DetectorFs {
-  exists(p: string): Promise<boolean>;
-  read(p: string): Promise<string>;
+  exists(filePath: string): Promise<boolean>;
+  read(filePath: string): Promise<string>;
+  list?(dir: string): Promise<readonly string[]>;
 }
 
 /**
@@ -24,7 +25,17 @@ export interface DetectedStep {
     | string
     | { readonly files?: string; readonly project?: string };
   readonly files?: string;
-  readonly invocation?: "args" | "project" | "per-file";
+  readonly invocation?:
+    | "args"
+    | "project"
+    | "per-file"
+    | "per-directory"
+    | "per-marker-dir";
+  readonly "dir-from"?: "parent";
+  readonly marker?: string | readonly string[];
+  readonly "exclude-ancestors"?: string | readonly string[];
+  readonly parallel?: number;
+  readonly "on-failure"?: "warn" | "fail";
   readonly tags?: readonly string[];
   readonly description?: string;
 }

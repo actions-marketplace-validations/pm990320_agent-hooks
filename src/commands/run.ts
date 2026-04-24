@@ -2,6 +2,13 @@ import type { Command } from "commander";
 import { ExitError } from "../cli.ts";
 import { ConfigError, ConfigNotFoundError } from "../config/errors.ts";
 import { loadConfig, type LoadedConfig } from "../config/load.ts";
+import {
+  loadProjectConfig,
+  resolveWorkspaceSelector,
+  type LoadedProject,
+  type LoadedMonorepoProject,
+  type LoadedWorkspaceConfig,
+} from "../config/project.ts";
 import type { Config, Pipeline } from "../config/schema.ts";
 import { pickReporter, type Reporter } from "../reporters/index.ts";
 import {
@@ -34,12 +41,13 @@ import {
 } from "../runners/files.ts";
 import { runPipeline } from "../runners/pipeline.ts";
 import { registerChild } from "../runners/process-registry.ts";
+import { routeRepoFiles } from "../runners/workspace-paths.ts";
 import { resolveSkipDirectives } from "../runners/skip-directives.ts";
 import { spawnProcess, streamToText } from "../runners/spawn.ts";
 import type { ExecFn } from "../runners/step.ts";
 import type { StepOutcome } from "../runners/pipeline.ts";
 import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 // --- Public shape --------------------------------------------------------
 
@@ -48,6 +56,7 @@ export interface RunCommandDeps {
   readonly write: (text: string) => void;
   readonly writeErr: (text: string) => void;
   readonly load: (cwd: string) => Promise<LoadedConfig>;
+  readonly loadProject?: (cwd: string) => Promise<LoadedProject>;
   readonly makeGit: (cwd: string) => GitRunner;
   readonly exec: ExecFn;
   readonly env: Record<string, string>;
@@ -65,6 +74,7 @@ export interface RunCommandDeps {
 
 export interface RunArgs {
   readonly target: string;
+  readonly workspace?: string;
   readonly explicitFiles?: readonly string[];
   readonly changed?: boolean;
   readonly staged?: boolean;
@@ -143,70 +153,133 @@ export function resolveTarget(
   return null;
 }
 
+function parseWorkspaceQualifiedTarget(target: string): {
+  readonly workspace: string | null;
+  readonly target: string;
+} {
+  const colon = target.indexOf(":");
+  if (colon <= 0 || colon === target.length - 1) {
+    return { workspace: null, target };
+  }
+  return {
+    workspace: target.slice(0, colon),
+    target: target.slice(colon + 1),
+  };
+}
+
+function normalizeExplicitFiles(
+  files: readonly string[] | undefined,
+  cwd: string,
+  repoRoot: string,
+): readonly string[] | undefined {
+  if (!files || files.length === 0) return files;
+  const root = resolve(repoRoot);
+  const from = resolve(cwd);
+  return files.map((file) => {
+    if (isAbsolute(file)) return file;
+    const absolute = resolve(from, file);
+    const rel = relative(root, absolute);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      return file;
+    }
+    return rel.replaceAll("\\", "/");
+  });
+}
+
+function rebaseGitRunner(
+  git: GitRunner,
+  workspace: Pick<LoadedWorkspaceConfig, "relativePath" | "workspaceRoot">,
+): GitRunner {
+  function rebase(files: readonly string[]): readonly string[] {
+    return files
+      .filter(
+        (file) =>
+          file === workspace.relativePath ||
+          file.startsWith(`${workspace.relativePath}/`),
+      )
+      .map((file) =>
+        file === workspace.relativePath
+          ? "."
+          : file.slice(workspace.relativePath.length + 1),
+      );
+  }
+
+  return {
+    staged: async () => rebase(await git.staged()),
+    changed: async (baseRef?: string) => rebase(await git.changed(baseRef)),
+    all: async () => rebase(await git.all()),
+    gitRoot: () => Promise.resolve(workspace.workspaceRoot),
+    ...(git.commitMessage
+      ? {
+          commitMessage: () => {
+            if (!git.commitMessage) return Promise.resolve(null);
+            return git.commitMessage();
+          },
+        }
+      : {}),
+    ...(git.modifiedUnder
+      ? {
+          modifiedUnder: async (subPath: string) => {
+            const target =
+              subPath === "." || subPath.length === 0
+                ? workspace.relativePath
+                : `${workspace.relativePath}/${subPath}`.replaceAll("//", "/");
+            if (!git.modifiedUnder) return [];
+            return rebase(await git.modifiedUnder(target));
+          },
+        }
+      : {}),
+    ...(git.stage
+      ? {
+          stage: async (paths: readonly string[]) => {
+            const repoPaths = paths.map((file) =>
+              file === "." || file.length === 0
+                ? workspace.relativePath
+                : `${workspace.relativePath}/${file}`.replaceAll("//", "/"),
+            );
+            if (!git.stage) return;
+            await git.stage(repoPaths);
+          },
+        }
+      : {}),
+  };
+}
+
 // --- Core action ---------------------------------------------------------
 
-export async function runCommand(
+interface PreparedRun {
+  readonly repoRoot: string;
+  readonly git: GitRunner;
+  readonly scope: Scope;
+  readonly files: readonly string[];
+  readonly directives: ReturnType<typeof resolveSkipDirectives>;
+  readonly promptContext: PromptContext;
+}
+
+interface ExecuteTargetOptions {
+  readonly target: string;
+  readonly cwd: string;
+  readonly loaded: LoadedConfig;
+  readonly git: GitRunner;
+  readonly files: readonly string[];
+  readonly prepared: PreparedRun;
+}
+
+async function prepareRun(
   args: RunArgs,
   deps: RunCommandDeps,
-): Promise<number> {
-  let loaded: LoadedConfig;
-  try {
-    loaded = await deps.load(deps.cwd);
-  } catch (err) {
-    if (err instanceof ConfigNotFoundError || err instanceof ConfigError) {
-      deps.writeErr(`✗ ${err.message}\n`);
-      if (err.details) deps.writeErr(`${err.details}\n`);
-      return 2;
-    }
-    throw err;
-  }
-
-  const resolved = resolveTarget(loaded.config, args.target);
-  if (!resolved) {
-    deps.writeErr(
-      `✗ unknown pipeline or step: "${args.target}"\n` +
-        `  known pipelines: ${Object.keys(loaded.config.pipelines).join(", ") || "(none)"}\n` +
-        `  known steps:     ${Object.keys(loaded.config.steps).join(", ") || "(none)"}\n`,
-    );
-    return 2;
-  }
-
+  repoRoot: string,
+  git: GitRunner,
+): Promise<PreparedRun> {
   const scope = pickScope(args);
-  // Re-anchor at the git root so `agent-hooks ci --all` invoked from
-  // a subdir doesn't see a partial file list. `git ls-files` from a
-  // subdir only reports paths under that subdir, which silently hides
-  // files outside it. We swap to the toplevel and use that as the
-  // effective cwd for both file resolution and step execution.
-  const initialGit = deps.makeGit(deps.cwd);
-  const repoRoot =
-    (initialGit.gitRoot && (await initialGit.gitRoot())) ?? deps.cwd;
-  const effectiveCwd = repoRoot;
-  const git =
-    effectiveCwd === deps.cwd ? initialGit : deps.makeGit(effectiveCwd);
-  let files;
-  try {
-    files = await resolveFiles(git, {
-      scope,
-      ...(args.explicitFiles ? { files: args.explicitFiles } : {}),
-      repoRoot: effectiveCwd,
-      ...(args.allowOutsideRepo ? { allowOutsideRepo: true } : {}),
-    });
-  } catch (err) {
-    if (err instanceof PathOutsideRepoError) {
-      deps.writeErr(`✗ ${err.message}\n`);
-      return 2;
-    }
-    throw err;
-  }
+  const explicitFiles = normalizeExplicitFiles(args.explicitFiles, deps.cwd, repoRoot);
+  const resolvedFiles = await resolveFiles(git, {
+    scope,
+    ...(explicitFiles ? { files: explicitFiles } : {}),
+    repoRoot,
+    ...(args.allowOutsideRepo ? { allowOutsideRepo: true } : {}),
+  });
 
-  const reporter =
-    deps.reporter ?? pickReporter({ env: deps.env, write: deps.write });
-
-  // Layer skip directives: CLI > env > commit message. The resolver
-  // produces unified skip + only sets that we hand to the runner. If
-  // skipAll fires we short-circuit by setting skip to every step.
-  // Reading HEAD's commit message is best-effort: a fresh repo or a
-  // non-git cwd just yields `null` and the layer no-ops.
   let commitMessage: string | null = null;
   if (git.commitMessage) {
     try {
@@ -222,40 +295,57 @@ export async function runCommand(
     ...(commitMessage ? { commitMessage } : {}),
   });
 
-  let effectiveSkip = directives.skip;
-  if (directives.skipAll) {
+  return {
+    repoRoot,
+    git,
+    scope,
+    files: resolvedFiles.files,
+    directives,
+    promptContext: args.promptContext ?? detectPromptContext(deps.env),
+  };
+}
+
+async function executeResolvedTarget(
+  args: RunArgs,
+  deps: RunCommandDeps,
+  options: ExecuteTargetOptions,
+): Promise<number> {
+  const { target, cwd, loaded, git, files, prepared } = options;
+  const resolved = resolveTarget(loaded.config, target);
+  if (!resolved) return 0;
+
+  const reporter =
+    deps.reporter ?? pickReporter({ env: deps.env, write: deps.write });
+
+  let effectiveSkip = prepared.directives.skip;
+  if (prepared.directives.skipAll) {
     effectiveSkip = new Set(Object.keys(resolved.config.steps));
     deps.write(
       `  ⊘ skipping all steps (skipAll directive from ${
-        directives.sources[directives.sources.length - 1]?.from.kind ?? "config"
+        prepared.directives.sources[prepared.directives.sources.length - 1]?.from
+          .kind ?? "config"
       })\n`,
     );
   }
 
-  // Resolve the effective environment by layering direnv, mise/asdf,
-  // venv, and node_modules/.bin on top of the base env. The user's
-  // top-level `env:` block wins last. Setting `envResolver: null`
-  // disables the auto-resolution layers entirely (used by tests that
-  // want to assert the un-augmented env reaches the runner).
   let pipelineEnv = deps.env;
   if (deps.envResolver !== null) {
     const resolverImpl = deps.envResolver ?? defaultEnvResolver;
     const resolvedEnv = await resolveEnvironment(
       {
-        cwd: effectiveCwd,
+        cwd,
         baseEnv: deps.env,
         ...(loaded.config.env ? { configEnv: loaded.config.env } : {}),
       },
       resolverImpl,
     );
     pipelineEnv = resolvedEnv.env;
-    // Surface non-process layers as a single line so users see what
-    // fired without having to grep for it. Process is always layer 1
-    // and isn't worth printing.
-    const meaningful = resolvedEnv.sources.filter((s) => s.kind !== "process");
+    const meaningful = resolvedEnv.sources.filter(
+      (source) => source.kind !== "process",
+    );
     if (meaningful.length > 0) {
       const summary = meaningful
-        .map((s) => `${s.kind}(${String(s.keysApplied)})`)
+        .map((source) => `${source.kind}(${String(source.keysApplied)})`)
         .join(" ");
       deps.write(`  ↳ env: ${summary}\n`);
     }
@@ -264,18 +354,25 @@ export async function runCommand(
     }
   }
 
-  const promptContext: PromptContext =
-    args.promptContext ?? detectPromptContext(deps.env);
-  const promptPolicy = pickPromptPolicy(promptContext, args.noPrompts ?? false);
+  const promptPolicy = pickPromptPolicy(
+    prepared.promptContext,
+    args.noPrompts ?? false,
+  );
   const artifactBaseline = new Map<string, ArtifactSnapshot>();
-  const playwrightCheckpoint = await detectPlaywrightCheckpoint(effectiveCwd);
+  const playwrightCheckpoint = await detectPlaywrightCheckpoint(cwd);
   const ciReportLines: string[] = [];
-  const buildArtifactsReport = (stepName: string, before: ArtifactSnapshot, after: ArtifactSnapshot): string[] =>
-    diffArtifacts(before, after).filter((path) => {
-      const step = resolved.config.steps[stepName];
-      const candidates = effectiveArtifactInputs(step?.artifacts);
-      return candidates.some((candidate) => path.startsWith(candidate));
-    }).sort();
+  const buildArtifactsReport = (
+    stepName: string,
+    before: ArtifactSnapshot,
+    after: ArtifactSnapshot,
+  ): string[] =>
+    diffArtifacts(before, after)
+      .filter((path) => {
+        const step = resolved.config.steps[stepName];
+        const candidates = effectiveArtifactInputs(step?.artifacts);
+        return candidates.some((candidate) => path.startsWith(candidate));
+      })
+      .sort();
 
   function yamlEscape(value: string): string {
     if (value.length === 0) return '""';
@@ -287,11 +384,8 @@ export async function runCommand(
 
   function writeCiReport(lines: readonly string[]): void {
     if (lines.length === 0) return;
-    const reportPath = resolve(effectiveCwd, "agent-hooks-report.yml");
-    const body = ["steps:"]
-      .concat(lines)
-      .join("\n")
-      .concat("\n");
+    const reportPath = resolve(cwd, "agent-hooks-report.yml");
+    const body = ["steps:"].concat(lines).join("\n").concat("\n");
     writeFileSync(reportPath, body, "utf8");
   }
 
@@ -299,14 +393,14 @@ export async function runCommand(
     outcome: StepOutcome,
     artifacts: readonly string[],
   ): string[] {
-    const files = (outcome.result?.files ?? []).join(" ");
+    const emittedFiles = (outcome.result?.files ?? []).join(" ");
     const lines: string[] = [];
     lines.push(`- step: ${yamlEscape(outcome.name)}`);
     lines.push("  status: failed");
     lines.push(`  exit_code: ${String(outcome.result?.exitCode ?? 0)}`);
     lines.push(`  duration: ${String(stepDurationSeconds(outcome) ?? 0)}s`);
     lines.push(`  summary: ${yamlEscape(outcome.result?.reason ?? "failed")}`);
-    if (files.length > 0) {
+    if (emittedFiles.length > 0) {
       lines.push("  files:");
       for (const file of outcome.result?.files ?? []) {
         lines.push(`    - ${yamlEscape(file)}`);
@@ -330,12 +424,15 @@ export async function runCommand(
     {
       pipelineName: resolved.pipelineName,
       config: resolved.config,
-      files: files.files,
-      cwd: effectiveCwd,
+      files,
+      cwd,
+      repoRoot: prepared.repoRoot,
       env: pipelineEnv,
       git,
       ...(effectiveSkip.size > 0 ? { skip: effectiveSkip } : {}),
-      ...(directives.only.size > 0 ? { only: directives.only } : {}),
+      ...(prepared.directives.only.size > 0
+        ? { only: prepared.directives.only }
+        : {}),
       ...(args.jobs !== undefined ? { jobs: args.jobs } : {}),
       ...(args.forceGates ? { forceGates: true } : {}),
       onStepStart: (info) => {
@@ -343,7 +440,7 @@ export async function runCommand(
         const step = resolved.config.steps[info.name];
         if (!step) return;
         const candidates = effectiveArtifactInputs(step.artifacts);
-        const before = snapshotArtifacts(effectiveCwd, candidates);
+        const before = snapshotArtifacts(cwd, candidates);
         artifactBaseline.set(info.name, before);
       },
       onStepEnd: (outcome) => {
@@ -352,18 +449,14 @@ export async function runCommand(
         if (step) {
           const candidates = effectiveArtifactInputs(step.artifacts);
           const before = artifactBaseline.get(outcome.name) ?? new Map();
-          const after = snapshotArtifacts(effectiveCwd, candidates);
-          const artifacts = buildArtifactsReport(
-            outcome.name,
-            before,
-            after,
-          );
+          const after = snapshotArtifacts(cwd, candidates);
+          const artifacts = buildArtifactsReport(outcome.name, before, after);
           if (shouldEmitPrompt(outcome, promptPolicy)) {
             deps.writeErr(
               renderNextStepBlock({
                 outcome,
                 step,
-                cwd: effectiveCwd,
+                cwd,
                 files: outcome.result?.files ?? [],
                 playwrightCheckpoint,
                 artifacts,
@@ -371,22 +464,220 @@ export async function runCommand(
             );
           }
           if (
-            promptContext === "ci" &&
+            prepared.promptContext === "ci" &&
             outcome.result?.status === "failed"
           ) {
-            const lines = buildCiReportEntry(outcome, artifacts);
-            if (lines.length > 0) ciReportLines.push(...lines);
+            ciReportLines.push(...buildCiReportEntry(outcome, artifacts));
           }
         }
       },
     },
     deps.exec,
   );
-  if (promptContext === "ci" && ciReportLines.length > 0) {
+  if (prepared.promptContext === "ci" && ciReportLines.length > 0) {
     writeCiReport(ciReportLines);
   }
   reporter.pipelineEnd(result);
   return result.exitCode;
+}
+
+function formatUnknownTargetError(
+  loaded: LoadedConfig,
+  target: string,
+): string {
+  return (
+    `✗ unknown pipeline or step: "${target}"\n` +
+    `  known pipelines: ${Object.keys(loaded.config.pipelines).join(", ") || "(none)"}\n` +
+    `  known steps:     ${Object.keys(loaded.config.steps).join(", ") || "(none)"}\n`
+  );
+}
+
+function selectWorkspacesForRun(
+  project: LoadedMonorepoProject,
+  args: RunArgs,
+  target: string,
+  repoFiles: ReturnType<typeof routeRepoFiles>,
+  explicitSelector: string | null,
+): {
+  readonly workspaces: readonly LoadedWorkspaceConfig[];
+  readonly includeRoot: boolean;
+  readonly error?: string;
+} {
+  const cliSelector = args.workspace ?? null;
+  if (cliSelector && explicitSelector && cliSelector !== explicitSelector) {
+    return {
+      workspaces: [],
+      includeRoot: false,
+      error:
+        `✗ workspace selector mismatch: --workspace=${cliSelector} but target uses ${explicitSelector}:${target}\n`,
+    };
+  }
+  const selector = cliSelector ?? explicitSelector;
+  if (selector) {
+    const resolution = resolveWorkspaceSelector(project.workspaces, selector);
+    if (resolution.status === "missing") {
+      return {
+        workspaces: [],
+        includeRoot: false,
+        error: `✗ unknown workspace selector: "${selector}"\n`,
+      };
+    }
+    if (resolution.status === "ambiguous") {
+      const matches = resolution.matches
+        .map((workspace) => workspace.relativePath)
+        .join(", ");
+      return {
+        workspaces: [],
+        includeRoot: false,
+        error: `✗ workspace selector "${selector}" is ambiguous: ${matches}\n`,
+      };
+    }
+    return {
+      workspaces: [resolution.workspace],
+      includeRoot: false,
+    };
+  }
+
+  if (target === "ci") {
+    return { workspaces: project.workspaces, includeRoot: true };
+  }
+
+  const mode =
+    project.root.config.monorepo?.["run-workspace-selection-default"] ??
+    "affected";
+  if (mode === "all") {
+    return { workspaces: project.workspaces, includeRoot: true };
+  }
+  const selected = repoFiles.workspaces.map((entry) => entry.workspace);
+  return { workspaces: selected, includeRoot: true };
+}
+
+export async function runCommand(
+  args: RunArgs,
+  deps: RunCommandDeps,
+): Promise<number> {
+  let project: LoadedProject;
+  try {
+    if (deps.loadProject) {
+      project = await deps.loadProject(deps.cwd);
+    } else {
+      project = { mode: "single", loaded: await deps.load(deps.cwd) };
+    }
+  } catch (err) {
+    if (err instanceof ConfigNotFoundError || err instanceof ConfigError) {
+      deps.writeErr(`✗ ${err.message}\n`);
+      if (err.details) deps.writeErr(`${err.details}\n`);
+      return 2;
+    }
+    throw err;
+  }
+
+  const parsedTarget = parseWorkspaceQualifiedTarget(args.target);
+
+  if (project.mode === "single") {
+    const loaded = project.loaded;
+    const resolved = resolveTarget(loaded.config, parsedTarget.target);
+    if (!resolved) {
+      deps.writeErr(formatUnknownTargetError(loaded, parsedTarget.target));
+      return 2;
+    }
+    const initialGit = deps.makeGit(deps.cwd);
+    const repoRoot =
+      (initialGit.gitRoot && (await initialGit.gitRoot())) ?? deps.cwd;
+    const effectiveCwd = repoRoot;
+    const git =
+      effectiveCwd === deps.cwd ? initialGit : deps.makeGit(effectiveCwd);
+    let prepared: PreparedRun;
+    try {
+      prepared = await prepareRun(args, deps, effectiveCwd, git);
+    } catch (err) {
+      if (err instanceof PathOutsideRepoError) {
+        deps.writeErr(`✗ ${err.message}\n`);
+        return 2;
+      }
+      throw err;
+    }
+    return executeResolvedTarget(args, deps, {
+      target: parsedTarget.target,
+      cwd: effectiveCwd,
+      loaded,
+      git,
+      files: prepared.files,
+      prepared,
+    });
+  }
+
+  for (const warning of project.warnings) {
+    deps.write(`  ⚠ ${warning}\n`);
+  }
+
+  const git = deps.makeGit(project.repoRoot);
+  let prepared: PreparedRun;
+  try {
+    prepared = await prepareRun(args, deps, project.repoRoot, git);
+  } catch (err) {
+    if (err instanceof PathOutsideRepoError) {
+      deps.writeErr(`✗ ${err.message}\n`);
+      return 2;
+    }
+    throw err;
+  }
+  const routed = routeRepoFiles(prepared.files, project.workspaces);
+  const selection = selectWorkspacesForRun(
+    project,
+    args,
+    parsedTarget.target,
+    routed,
+    parsedTarget.workspace,
+  );
+  if (selection.error) {
+    deps.writeErr(selection.error);
+    return 2;
+  }
+
+  const workspaceFileMap = new Map(
+    routed.workspaces.map((entry) => [entry.workspace.relativePath, entry.workspaceFiles]),
+  );
+
+  const runs: Promise<number>[] = [];
+  let sawAny = false;
+
+  if (selection.includeRoot && resolveTarget(project.root.config, parsedTarget.target)) {
+    sawAny = true;
+    runs.push(
+      executeResolvedTarget(args, deps, {
+        target: parsedTarget.target,
+        cwd: project.repoRoot,
+        loaded: project.root,
+        git,
+        files: routed.rootFiles,
+        prepared,
+      }),
+    );
+  }
+
+  for (const workspace of selection.workspaces) {
+    if (!resolveTarget(workspace.config, parsedTarget.target)) continue;
+    sawAny = true;
+    runs.push(
+      executeResolvedTarget(args, deps, {
+        target: parsedTarget.target,
+        cwd: workspace.workspaceRoot,
+        loaded: workspace,
+        git: rebaseGitRunner(git, workspace),
+        files: workspaceFileMap.get(workspace.relativePath) ?? [],
+        prepared,
+      }),
+    );
+  }
+
+  if (!sawAny) {
+    deps.writeErr(formatUnknownTargetError(project.root, parsedTarget.target));
+    return 2;
+  }
+
+  const codes = await Promise.all(runs);
+  return codes.find((code) => code !== 0) ?? 0;
 }
 
 // --- Commander registration ---------------------------------------------
@@ -402,6 +693,9 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
   },
   load(cwd) {
     return loadConfig({ cwd });
+  },
+  loadProject(cwd) {
+    return loadProjectConfig({ cwd });
   },
   makeGit(cwd) {
     return createGitRunner(cwd, defaultSpawner);
@@ -523,12 +817,12 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
       const stderrPromise = streamToText(proc.stderr);
       const { exitCode, timedOut } = await runWithTimeout(proc);
       const graceMs = 500;
-      const raceGrace = (p: Promise<string>): Promise<string> =>
+      const raceGrace = (promise: Promise<string>): Promise<string> =>
         Promise.race([
-          p,
+          promise,
           new Promise<string>((resolve) => {
-            const t = setTimeout(() => resolve(""), graceMs);
-            (t as unknown as { unref?: () => void }).unref?.();
+            const timer = setTimeout(() => resolve(""), graceMs);
+            (timer as unknown as { unref?: () => void }).unref?.();
           }),
         ]);
       const [stdoutText, stderrText] = timedOut
@@ -555,8 +849,8 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
 function commaSplit(value: string): string[] {
   return value
     .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .map((stepName) => stepName.trim())
+    .filter((stepName) => stepName.length > 0);
 }
 
 interface RegisterOptions {
@@ -574,6 +868,13 @@ function effectiveDeps(
     makeGit: overrides?.makeGit ?? defaultRunDeps.makeGit,
     exec: overrides?.exec ?? defaultRunDeps.exec,
     env: overrides?.env ?? defaultRunDeps.env,
+    ...(
+      overrides?.loadProject !== undefined
+        ? { loadProject: overrides.loadProject }
+        : overrides?.load === undefined && defaultRunDeps.loadProject
+          ? { loadProject: defaultRunDeps.loadProject }
+          : {}
+    ),
   };
   if (
     overrides &&
@@ -607,7 +908,11 @@ function addRunnerOptions(
     .option("-a, --all", "every tracked file")
     .option("--skip <names>", "comma-separated step names to skip", commaSplit)
     .option("--only <names>", "comma-separated step names to run", commaSplit)
-    .option("-j, --jobs <n>", "parallelism cap", (v) => parseInt(v, 10))
+    .option(
+      "--workspace <selector>",
+      "workspace basename or relative path to target",
+    )
+    .option("-j, --jobs <n>", "parallelism cap", (value) => parseInt(value, 10))
     .option(
       "--force-gates",
       "bypass change-gates and run every step regardless",
@@ -631,6 +936,7 @@ function addRunnerOptions(
       const deps = effectiveDeps(opts.overrides);
       const args: RunArgs = {
         target: targetFrom(positional),
+        ...(flags.workspace ? { workspace: flags.workspace } : {}),
         ...(flags.files ? { explicitFiles: flags.files } : {}),
         ...(flags.changed ? { changed: true } : {}),
         ...(flags.staged ? { staged: true } : {}),
@@ -651,6 +957,7 @@ function addRunnerOptions(
 }
 
 interface RunCliFlags {
+  readonly workspace?: string;
   readonly files?: readonly string[];
   readonly changed?: boolean;
   readonly staged?: boolean;

@@ -100,7 +100,7 @@ async function which(cmd: string): Promise<string | null> {
   // POSIX `command -v <name>` / Windows `where`. We avoid spawning when
   // PATH is empty.
   const pathEnv = process.env.PATH ?? "";
-  const dirs = pathEnv.split(path.delimiter).filter((d) => d.length > 0);
+  const dirs = pathEnv.split(path.delimiter).filter((directory) => directory.length > 0);
   for (const dir of dirs) {
     const candidate = path.join(dir, cmd);
     try {
@@ -117,9 +117,9 @@ export const defaultPreflightResolver: PreflightResolver = {
   whichCommand: which,
   getEnv: (name) => process.env[name] ?? null,
   fs: {
-    async exists(p) {
+    async exists(filePath) {
       try {
-        await nodeFs.access(p);
+        await nodeFs.access(filePath);
         return true;
       } catch {
         return false;

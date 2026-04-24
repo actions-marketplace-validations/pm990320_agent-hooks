@@ -156,15 +156,17 @@ export function findBlock(text: string): FoundBlock | null {
   if (!endMatch) return null;
   const absoluteEndStart = afterBegin + endMatch.index;
   const end = absoluteEndStart + endMatch[0].length;
+  const hash = beginMatch[2];
+  if (hash === undefined) return null;
   return {
     start,
     end,
-    hash: beginMatch[2]!,
+    hash,
   };
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(sourceText: string): string {
+  return sourceText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // --- Splice --------------------------------------------------------------

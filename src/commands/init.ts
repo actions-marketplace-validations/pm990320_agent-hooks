@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import nodeFs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
+import { stdin as input, stdout as output } from "node:process";
 import YAML from "yaml";
 import { ExitError } from "../cli.ts";
 import { ConfigSchema } from "../config/schema.ts";
@@ -51,10 +52,10 @@ import {
 } from "./init-conflicts.ts";
 
 export interface InitFs {
-  exists(p: string): Promise<boolean>;
-  read(p: string): Promise<string>;
-  write(p: string, contents: string, mode?: number): Promise<void>;
-  mkdirRecursive(p: string): Promise<void>;
+  exists(filePath: string): Promise<boolean>;
+  read(filePath: string): Promise<string>;
+  write(filePath: string, contents: string, mode?: number): Promise<void>;
+  mkdirRecursive(dirPath: string): Promise<void>;
   /**
    * List the file names (not full paths) inside `dir`. Returns an
    * empty array if the directory doesn't exist — callers don't want
@@ -62,6 +63,8 @@ export interface InitFs {
    */
   list?(dir: string): Promise<readonly string[]>;
 }
+
+export type MonorepoPrompter = () => Promise<boolean>;
 
 export interface InitCommandDeps {
   readonly cwd: string;
@@ -88,6 +91,13 @@ export interface InitCommandDeps {
    * fs adapter wrapping InitFs.
    */
   readonly agentsMdFs?: AgentsMdFs;
+  /**
+   * Optional prompt used by init to decide whether to scaffold the
+   * current repo as a monorepo root when --monorepo was not passed.
+   * Defaults to a TTY-only yes/no prompt; non-interactive runs never
+   * block and simply keep the existing single-repo scaffold.
+   */
+  readonly monorepoPrompter?: MonorepoPrompter;
 }
 
 export interface InitArgs {
@@ -103,6 +113,8 @@ export interface InitArgs {
   readonly noTemplates?: boolean;
   /** Project name for the generated config (`name:` field). */
   readonly name?: string;
+  /** Scaffold a monorepo root manifest/config instead of a single-project config. */
+  readonly monorepo?: boolean;
   /**
    * Override the GitHub Actions workflow file name. Defaults to
    * `agent-hooks.yml`; useful when `agent-hooks.yml` is already in use
@@ -176,6 +188,35 @@ jobs:
       - run: agent-hooks ci
 `;
 
+export function renderMonorepoConfigYaml(name = "my-project"): string {
+  const header = [
+    "# yaml-language-server: $schema=https://raw.githubusercontent.com/pm990320/agent-hooks/main/schema.json",
+    "",
+    "# Monorepo root scaffold — edit `workspaces` to match your repo layout.",
+    "# Child workspace configs stay service-owned and live under each workspace root.",
+    "",
+  ];
+  const document: Record<string, unknown> = {
+    name,
+    workspaces: ["services/*"],
+    monorepo: {
+      "run-workspace-selection-default": "affected",
+    },
+    steps: {},
+    pipelines: {},
+  };
+  return `${header.join("\n")}${YAML.stringify(document, { lineWidth: 0 })}`;
+}
+
+async function resolveMonorepoInitMode(
+  args: InitArgs,
+  deps: InitCommandDeps,
+): Promise<boolean> {
+  if (args.monorepo === true) return true;
+  if (!deps.monorepoPrompter) return false;
+  return await deps.monorepoPrompter();
+}
+
 // --- Core action ---------------------------------------------------------
 
 export interface InitOutcome {
@@ -198,8 +239,9 @@ export interface InitOutcome {
 
 function initFsAsDetectorFs(fs: InitFs): DetectorFs {
   return {
-    exists: (p) => fs.exists(p),
-    read: (p) => fs.read(p),
+    exists: (filePath) => fs.exists(filePath),
+    read: (filePath) => fs.read(filePath),
+    list: (dir) => fs.list?.(dir) ?? Promise.resolve([]),
   };
 }
 
@@ -220,7 +262,7 @@ async function resolveFragment(
     const detector = getDetector(args.template);
     if (!detector) {
       throw new Error(
-        `unknown detector template: "${args.template}" (known: ${DETECTORS.map((d) => d.name).join(", ")})`,
+        `unknown detector template: "${args.template}" (known: ${DETECTORS.map((detector) => detector.name).join(", ")})`,
       );
     }
     const forced: Detector[] = [
@@ -528,23 +570,33 @@ export async function runInitCommand(
   // to "no config detected" and the caller falls through to defaults.
   const installCfg = await readExistingInstallConfig(deps);
 
-  const fragment = await resolveFragment(args, deps);
-  const configYaml = renderConfigYaml(
-    {
-      steps: fragment.steps as typeof FALLBACK_FRAGMENT.steps,
-      pipelines: fragment.pipelines as typeof FALLBACK_FRAGMENT.pipelines,
-      gitHooks: fragment.gitHooks as typeof FALLBACK_FRAGMENT.gitHooks,
-      detectorNames: fragment.detectorNames,
-      notes: fragment.notes,
-    },
-    args.name ?? "my-project",
-  );
+  const monorepoInit = await resolveMonorepoInitMode(args, deps);
+
+  let fragment: Awaited<ReturnType<typeof resolveFragment>> | undefined;
+  let configYaml: string;
+  if (monorepoInit) {
+    configYaml = renderMonorepoConfigYaml(args.name ?? "my-project");
+  } else {
+    fragment = await resolveFragment(args, deps);
+    configYaml = renderConfigYaml(
+      {
+        steps: fragment.steps as typeof FALLBACK_FRAGMENT.steps,
+        pipelines: fragment.pipelines as typeof FALLBACK_FRAGMENT.pipelines,
+        gitHooks: fragment.gitHooks as typeof FALLBACK_FRAGMENT.gitHooks,
+        detectorNames: fragment.detectorNames,
+        notes: fragment.notes,
+      },
+      args.name ?? "my-project",
+    );
+  }
+
+  const detectorNames = fragment?.detectorNames ?? [];
 
   // Print a short plan summary so users see which detectors fired.
-  if (fragment.detectorNames.length > 0) {
-    deps.write(
-      `  detect  ${fragment.detectorNames.join(", ")}\n`,
-    );
+  if (monorepoInit) {
+    deps.write(`  detect  monorepo root scaffold\n`);
+  } else if (detectorNames.length > 0) {
+    deps.write(`  detect  ${detectorNames.join(", ")}\n`);
   } else {
     deps.write(`  detect  none — using minimal skeleton\n`);
   }
@@ -691,7 +743,7 @@ export async function runInitCommand(
       wroteWorkflow,
       installedHooks,
       postinstall,
-      detectors: fragment.detectorNames,
+      detectors: detectorNames,
       skillsInstalled: skillInstalled,
       agentsMd: agentsMdOutcomes,
     },
@@ -719,9 +771,9 @@ async function maybeInstallAgentsMdBlock(input: {
 
 function initFsAsAgentsMdFs(fs: InitFs): AgentsMdFs {
   return {
-    exists: (p) => fs.exists(p),
-    read: (p) => fs.read(p),
-    write: (p, contents) => fs.write(p, contents),
+    exists: (filePath) => fs.exists(filePath),
+    read: (filePath) => fs.read(filePath),
+    write: (filePath, contents) => fs.write(filePath, contents),
   };
 }
 
@@ -734,28 +786,28 @@ async function installRequestedSkills(input: {
   const targets: readonly SkillTarget[] =
     target === "auto" ? SKILL_TARGETS : [target as SkillTarget];
   const installed: string[] = [];
-  for (const t of targets) {
-    if (!isSkillTarget(t)) {
-      deps.write(`  skip    skill (unknown target: ${String(t)})\n`);
+  for (const target of targets) {
+    if (!isSkillTarget(target)) {
+      deps.write(`  skip    skill (unknown target: ${String(target)})\n`);
       continue;
     }
     if (dryRun) {
-      deps.write(`  plan    install skill for ${t}\n`);
-      installed.push(t);
+      deps.write(`  plan    install skill for ${target}\n`);
+      installed.push(target);
       continue;
     }
     try {
       const result = await installSkill({
-        target: t,
+        target,
         scope: "user",
         repoCwd: deps.cwd,
         fs: deps.skillFs ?? defaultSkillFs,
       });
       deps.write(`  skill   ${result.filePath}\n`);
-      installed.push(t);
+      installed.push(target);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      deps.write(`  ⚠ skill install failed for ${t}: ${msg}\n`);
+      deps.write(`  ⚠ skill install failed for ${target}: ${msg}\n`);
     }
   }
   return installed;
@@ -768,25 +820,25 @@ function isSkillTarget(value: string): value is SkillTarget {
 // --- Default FS adapter --------------------------------------------------
 
 export const defaultInitFs: InitFs = {
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;
     }
   },
-  read(p) {
-    return nodeFs.readFile(p, "utf8");
+  read(filePath) {
+    return nodeFs.readFile(filePath, "utf8");
   },
-  async write(p, contents, mode) {
-    await nodeFs.writeFile(p, contents, "utf8");
+  async write(filePath, contents, mode) {
+    await nodeFs.writeFile(filePath, contents, "utf8");
     if (mode !== undefined) {
-      await nodeFs.chmod(p, mode);
+      await nodeFs.chmod(filePath, mode);
     }
   },
-  async mkdirRecursive(p) {
-    await nodeFs.mkdir(p, { recursive: true });
+  async mkdirRecursive(dirPath) {
+    await nodeFs.mkdir(dirPath, { recursive: true });
   },
   async list(dir) {
     try {
@@ -798,9 +850,9 @@ export const defaultInitFs: InitFs = {
 };
 
 export const defaultPostinstallFs: PostinstallFs = {
-  exists: (p) => defaultInitFs.exists(p),
-  read: (p) => defaultInitFs.read(p),
-  write: (p, contents) => defaultInitFs.write(p, contents),
+  exists: (filePath) => defaultInitFs.exists(filePath),
+  read: (filePath) => defaultInitFs.read(filePath),
+  write: (filePath, contents) => defaultInitFs.write(filePath, contents),
 };
 
 /**
@@ -809,24 +861,41 @@ export const defaultPostinstallFs: PostinstallFs = {
  * fallback so piped / scripted `init` runs never block waiting for
  * input that will never come.
  */
+function promptWithReadline(prompt: string): Promise<string> {
+  return new Promise<string>((resolve) => {
+    const rl = readline.createInterface({
+      input,
+      output,
+    });
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
 export function defaultConflictPrompter(): ConflictPrompter {
   if (!process.stdin.isTTY) {
     return nonInteractiveKeepPrompter;
   }
   return createInteractivePrompter({
     write: (text) => process.stdout.write(text),
-    read: (prompt) =>
-      new Promise<string>((resolve) => {
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-        rl.question(prompt, (answer) => {
-          rl.close();
-          resolve(answer);
-        });
-      }),
+    read: (prompt) => promptWithReadline(prompt),
   });
+}
+
+export function defaultMonorepoPrompter(): MonorepoPrompter {
+  if (!process.stdin.isTTY) {
+    return () => Promise.resolve(false);
+  }
+  return async () => {
+    const answer = (
+      await promptWithReadline("Is this repo a monorepo? [y/N] ")
+    )
+      .trim()
+      .toLowerCase();
+    return answer === "y" || answer === "yes";
+  };
 }
 
 // --- Commander registration ---------------------------------------------
@@ -842,6 +911,7 @@ export function registerInitCommand(
     )
     .option("--force", "overwrite existing files")
     .option("--dry-run", "print planned actions without writing")
+    .option("--monorepo", "scaffold a monorepo root manifest/config")
     .option("--with-postinstall", "force postinstall wiring")
     .option("--no-postinstall", "skip postinstall wiring")
     .option("--with-github-actions", "force GH Actions workflow scaffolding")
@@ -869,6 +939,7 @@ export function registerInitCommand(
       const flags: {
         force?: boolean;
         dryRun?: boolean;
+        monorepo?: boolean;
         postinstall?: boolean;
         githubActions?: boolean;
         withPostinstall?: boolean;
@@ -881,16 +952,19 @@ export function registerInitCommand(
       } = this.opts();
       const deps: InitCommandDeps = {
         cwd: overrides.cwd ?? process.cwd(),
-        write: overrides.write ?? ((t) => process.stdout.write(t)),
+        write: overrides.write ?? ((text) => process.stdout.write(text)),
         fs: overrides.fs ?? defaultInitFs,
         hookFs: overrides.hookFs ?? defaultHookFs,
         postinstallFs: overrides.postinstallFs ?? defaultPostinstallFs,
         prompter: overrides.prompter ?? defaultConflictPrompter(),
+        monorepoPrompter:
+          overrides.monorepoPrompter ?? defaultMonorepoPrompter(),
       };
       // Commander's --no-foo sets flags.foo = false; --foo sets true.
       const args: InitArgs = {
         ...(flags.force ? { force: true } : {}),
         ...(flags.dryRun ? { dryRun: true } : {}),
+        ...(flags.monorepo ? { monorepo: true } : {}),
         ...(flags.postinstall === false ? { noPostinstall: true } : {}),
         ...(flags.postinstall === true ? { withPostinstall: true } : {}),
         ...(flags.githubActions === false ? { noGithubActions: true } : {}),

@@ -138,6 +138,6 @@ function anyFileMatches(
   globs: readonly string[],
 ): boolean {
   if (globs.length === 0) return false;
-  const matchers = globs.map((g) => picomatch(g, { dot: true }));
-  return files.some((f) => matchers.some((m) => m(f)));
+  const matchers = globs.map((glob) => picomatch(glob, { dot: true }));
+  return files.some((filePath) => matchers.some((matcher) => matcher(filePath)));
 }

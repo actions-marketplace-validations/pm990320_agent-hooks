@@ -2,16 +2,29 @@ import type { Command } from "commander";
 import { ExitError } from "../cli.ts";
 import { ConfigError, ConfigNotFoundError } from "../config/errors.ts";
 import type { LoadedConfig } from "../config/load.ts";
+import {
+  type LoadedProject,
+  type LoadedWorkspaceConfig,
+} from "../config/project.ts";
 import { dispatchAgentHook } from "../hooks/dispatch.ts";
-import { dispatchGitHook } from "../hooks/git/dispatch.ts";
+import { dispatchGitHook, scopeForGitHook } from "../hooks/git/dispatch.ts";
 import { getAgentHandler } from "../hooks/registry.ts";
 import { pickReporter } from "../reporters/index.ts";
+import { resolveFiles, type GitRunner, type Scope } from "../runners/files.ts";
+import { routeRepoFiles } from "../runners/workspace-paths.ts";
 import { defaultRunDeps, type RunCommandDeps } from "./run.ts";
 
 export interface HookCommandDeps
   extends Pick<
     RunCommandDeps,
-    "cwd" | "write" | "writeErr" | "load" | "makeGit" | "exec" | "env"
+    | "cwd"
+    | "write"
+    | "writeErr"
+    | "load"
+    | "loadProject"
+    | "makeGit"
+    | "exec"
+    | "env"
   > {
   readonly readStdin: () => Promise<string>;
 }
@@ -123,33 +136,204 @@ async function loadOrReport(
   }
 }
 
+async function loadProjectOrReport(
+  deps: HookCommandDeps,
+): Promise<LoadedProject | number> {
+  try {
+    if (deps.loadProject) {
+      return await deps.loadProject(deps.cwd);
+    }
+    return { mode: "single", loaded: await deps.load(deps.cwd) };
+  } catch (err) {
+    if (err instanceof ConfigError || err instanceof ConfigNotFoundError) {
+      deps.writeErr(`✗ ${err.message}\n`);
+      if (err.details) deps.writeErr(`${err.details}\n`);
+      return 2;
+    }
+    throw err;
+  }
+}
+
+function rebaseGitRunner(
+  git: GitRunner,
+  workspace: Pick<LoadedWorkspaceConfig, "relativePath" | "workspaceRoot">,
+): GitRunner {
+  function rebase(files: readonly string[]): readonly string[] {
+    return files
+      .filter(
+        (file) =>
+          file === workspace.relativePath ||
+          file.startsWith(`${workspace.relativePath}/`),
+      )
+      .map((file) =>
+        file === workspace.relativePath
+          ? "."
+          : file.slice(workspace.relativePath.length + 1),
+      );
+  }
+
+  return {
+    staged: async () => rebase(await git.staged()),
+    changed: async (baseRef?: string) => rebase(await git.changed(baseRef)),
+    all: async () => rebase(await git.all()),
+    ...(git.gitRoot
+      ? { gitRoot: () => Promise.resolve(workspace.workspaceRoot) }
+      : {}),
+    ...(git.commitMessage
+      ? {
+          commitMessage: () => {
+            if (!git.commitMessage) return Promise.resolve(null);
+            return git.commitMessage();
+          },
+        }
+      : {}),
+    ...(git.modifiedUnder
+      ? {
+          modifiedUnder: async (subPath: string) => {
+            const target =
+              subPath === "." || subPath.length === 0
+                ? workspace.relativePath
+                : `${workspace.relativePath}/${subPath}`.replaceAll("//", "/");
+            if (!git.modifiedUnder) return [];
+            return rebase(await git.modifiedUnder(target));
+          },
+        }
+      : {}),
+    ...(git.stage
+      ? {
+          stage: async (paths: readonly string[]) => {
+            const repoPaths = paths.map((file) =>
+              file === "." || file.length === 0
+                ? workspace.relativePath
+                : `${workspace.relativePath}/${file}`.replaceAll("//", "/"),
+            );
+            if (!git.stage) return;
+            await git.stage(repoPaths);
+          },
+        }
+      : {}),
+  };
+}
+
+function agentRulesExist(
+  loaded: LoadedConfig,
+  agentKey: string,
+  hookName: string,
+): boolean {
+  const rules = loaded.config.agents?.[agentKey]?.hooks?.[hookName];
+  return Array.isArray(rules) && rules.length > 0;
+}
+
+function gitRuleScope(loaded: LoadedConfig, hookName: string): Scope | null {
+  const rule = loaded.config.git?.hooks?.[hookName];
+  if (!rule) return null;
+  return rule.scope ?? scopeForGitHook(hookName);
+}
+
 async function runGit(
   hookName: string,
   deps: HookCommandDeps,
 ): Promise<number> {
-  const loaded = await loadOrReport(deps);
-  if (typeof loaded === "number") return loaded;
+  const project = await loadProjectOrReport(deps);
+  if (typeof project === "number") return project;
 
-  const reporter = pickReporter({ env: deps.env, write: deps.write });
-  const result = await dispatchGitHook({
-    hookName,
-    config: loaded.config,
-    cwd: deps.cwd,
-    env: deps.env,
-    git: deps.makeGit(deps.cwd),
-    exec: deps.exec,
-    reporter,
-    write: deps.write,
-  });
+  if (project.mode === "single") {
+    const reporter = pickReporter({ env: deps.env, write: deps.write });
+    const result = await dispatchGitHook({
+      hookName,
+      config: project.loaded.config,
+      cwd: deps.cwd,
+      repoRoot: deps.cwd,
+      env: deps.env,
+      git: deps.makeGit(deps.cwd),
+      exec: deps.exec,
+      reporter,
+      write: deps.write,
+    });
 
-  if (result.status === "no-rule") return 0;
-  if (result.status === "pipeline-missing") {
-    deps.writeErr(
-      `✗ git hook "${hookName}" references undefined pipeline\n`,
-    );
-    return 2;
+    if (result.status === "no-rule") return 0;
+    if (result.status === "pipeline-missing") {
+      deps.writeErr(`✗ git hook "${hookName}" references undefined pipeline\n`);
+      return 2;
+    }
+    return result.exitCode;
   }
-  return result.exitCode;
+
+  for (const warning of project.warnings) {
+    deps.write(`  ⚠ ${warning}\n`);
+  }
+
+  const git = deps.makeGit(project.repoRoot);
+  const candidates: { loaded: LoadedConfig; scope: Scope }[] = [];
+  const rootScope = gitRuleScope(project.root, hookName);
+  if (rootScope) candidates.push({ loaded: project.root, scope: rootScope });
+  for (const workspace of project.workspaces) {
+    const scope = gitRuleScope(workspace, hookName);
+    if (scope) candidates.push({ loaded: workspace, scope });
+  }
+  if (candidates.length === 0) return 0;
+
+  const filesByScope = new Map<Scope, readonly string[]>();
+  for (const candidate of candidates) {
+    if (filesByScope.has(candidate.scope)) continue;
+    const resolved = await resolveFiles(git, { scope: candidate.scope });
+    filesByScope.set(candidate.scope, resolved.files);
+  }
+
+  let finalCode = 0;
+  let sawAny = false;
+  const rootReporter = pickReporter({ env: deps.env, write: deps.write });
+  if (rootScope) {
+    const result = await dispatchGitHook({
+      hookName,
+      config: project.root.config,
+      cwd: project.repoRoot,
+      repoRoot: project.repoRoot,
+      env: deps.env,
+      git,
+      resolvedFiles: filesByScope.get(rootScope) ?? [],
+      exec: deps.exec,
+      reporter: rootReporter,
+      write: deps.write,
+    });
+    if (result.status === "pipeline-missing") {
+      deps.writeErr(`✗ git hook "${hookName}" references undefined pipeline\n`);
+      return 2;
+    }
+    if (result.status === "ran") {
+      sawAny = true;
+      if (finalCode === 0) finalCode = result.exitCode;
+    }
+  }
+
+  for (const workspace of project.workspaces) {
+    const scope = gitRuleScope(workspace, hookName);
+    if (!scope) continue;
+    const routed = routeRepoFiles(filesByScope.get(scope) ?? [], [workspace]);
+    const workspaceFiles = routed.workspaces[0]?.workspaceFiles ?? [];
+    const result = await dispatchGitHook({
+      hookName,
+      config: workspace.config,
+      cwd: workspace.workspaceRoot,
+      repoRoot: project.repoRoot,
+      env: deps.env,
+      git: rebaseGitRunner(git, workspace),
+      resolvedFiles: workspaceFiles,
+      exec: deps.exec,
+      reporter: pickReporter({ env: deps.env, write: deps.write }),
+      write: deps.write,
+    });
+    if (result.status === "pipeline-missing") {
+      deps.writeErr(`✗ git hook "${hookName}" references undefined pipeline\n`);
+      return 2;
+    }
+    if (result.status === "ran") {
+      sawAny = true;
+      if (finalCode === 0) finalCode = result.exitCode;
+    }
+  }
+
+  return sawAny ? finalCode : 0;
 }
 
 /**
@@ -182,68 +366,123 @@ async function runRegisteredAgent(
     return 2;
   }
 
-  const loaded = await loadOrReport(deps);
-  if (typeof loaded === "number") return loaded;
+  const project = await loadProjectOrReport(deps);
+  if (typeof project === "number") return project;
 
   const stdin = await deps.readStdin();
   const input = handler.parseInput(stdin);
-  const reporter = pickReporter({ env: deps.env, write: deps.write });
-  const result = await dispatchAgentHook({
-    agentKey: configKeyFor(agentName),
-    hookName,
-    input,
-    config: loaded.config,
-    cwd: deps.cwd,
-    env: deps.env,
-    git: deps.makeGit(deps.cwd),
-    exec: deps.exec,
-    reporter,
-  });
+  const agentKey = configKeyFor(agentName);
 
-  if (result.status === "no-rule" || result.status === "no-matcher-match") {
-    // Exit 0 because no-op is the right behaviour — most agents abort
-    // when a hook fails, and we don't want a config that omits a hook
-    // event to break every tool call. Keep a one-line note on stderr
-    // so the user can see why nothing happened, and a richer message
-    // when AGENT_HOOKS_DEBUG=1.
-    const reason =
-      result.status === "no-rule"
-        ? "no rule configured for this event"
-        : `no matcher matched tool "${input.toolName ?? "(none)"}"`;
-    deps.writeErr(`  ${agentName}/${hookName}: ${reason}\n`);
-    if (deps.env.AGENT_HOOKS_DEBUG === "1") {
-      const rules =
-        loaded.config.agents?.[configKeyFor(agentName)]?.hooks?.[hookName] ??
-        [];
-      deps.writeErr(
-        `  (configured rules: ${String(rules.length)}; tool: ${
-          input.toolName ?? "(none)"
-        })\n`,
-      );
+  if (project.mode === "single") {
+    const reporter = pickReporter({ env: deps.env, write: deps.write });
+    const result = await dispatchAgentHook({
+      agentKey,
+      hookName,
+      input,
+      config: project.loaded.config,
+      cwd: deps.cwd,
+      repoRoot: deps.cwd,
+      env: deps.env,
+      git: deps.makeGit(deps.cwd),
+      exec: deps.exec,
+      reporter,
+    });
+
+    if (result.status === "no-rule" || result.status === "no-matcher-match") {
+      const reason =
+        result.status === "no-rule"
+          ? "no rule configured for this event"
+          : `no matcher matched tool "${input.toolName ?? "(none)"}"`;
+      deps.writeErr(`  ${agentName}/${hookName}: ${reason}\n`);
+      if (deps.env.AGENT_HOOKS_DEBUG === "1") {
+        const rules =
+          project.loaded.config.agents?.[agentKey]?.hooks?.[hookName] ?? [];
+        deps.writeErr(
+          `  (configured rules: ${String(rules.length)}; tool: ${
+            input.toolName ?? "(none)"
+          })\n`,
+        );
+      }
+      return 0;
     }
+    if (result.status === "pipeline-missing") {
+      deps.writeErr(`✗ ${agentName} hook "${hookName}" references undefined pipeline\n`);
+      return 2;
+    }
+    return handler.stderrFeedbackOnExit2 && result.exitCode !== 0
+      ? 2
+      : result.exitCode;
+  }
+
+  for (const warning of project.warnings) {
+    deps.write(`  ⚠ ${warning}\n`);
+  }
+
+  const git = deps.makeGit(project.repoRoot);
+  const repoFiles =
+    input.files.length > 0
+      ? input.files
+      : (await resolveFiles(git, { scope: "changed" })).files;
+  const routed = routeRepoFiles(repoFiles, project.workspaces);
+
+  let sawAny = false;
+  let finalCode = 0;
+
+  if (agentRulesExist(project.root, agentKey, hookName)) {
+    const result = await dispatchAgentHook({
+      agentKey,
+      hookName,
+      input,
+      config: project.root.config,
+      cwd: project.repoRoot,
+      repoRoot: project.repoRoot,
+      env: deps.env,
+      git,
+      resolvedFiles: routed.rootFiles,
+      exec: deps.exec,
+      reporter: pickReporter({ env: deps.env, write: deps.write }),
+    });
+    if (result.status === "pipeline-missing") {
+      deps.writeErr(`✗ ${agentName} hook "${hookName}" references undefined pipeline\n`);
+      return 2;
+    }
+    if (result.status === "ran") {
+      sawAny = true;
+      if (finalCode === 0) finalCode = result.exitCode;
+    }
+  }
+
+  for (const routedWorkspace of routed.workspaces) {
+    if (!agentRulesExist(routedWorkspace.workspace, agentKey, hookName)) continue;
+    const result = await dispatchAgentHook({
+      agentKey,
+      hookName,
+      input,
+      config: routedWorkspace.workspace.config,
+      cwd: routedWorkspace.workspace.workspaceRoot,
+      repoRoot: project.repoRoot,
+      env: deps.env,
+      git: rebaseGitRunner(git, routedWorkspace.workspace),
+      resolvedFiles: routedWorkspace.workspaceFiles,
+      exec: deps.exec,
+      reporter: pickReporter({ env: deps.env, write: deps.write }),
+    });
+    if (result.status === "pipeline-missing") {
+      deps.writeErr(`✗ ${agentName} hook "${hookName}" references undefined pipeline\n`);
+      return 2;
+    }
+    if (result.status === "ran") {
+      sawAny = true;
+      if (finalCode === 0) finalCode = result.exitCode;
+    }
+  }
+
+  if (!sawAny) {
+    deps.writeErr(`  ${agentName}/${hookName}: no rule configured for this event\n`);
     return 0;
   }
-  if (result.status === "pipeline-missing") {
-    deps.writeErr(
-      `✗ ${agentName} hook "${hookName}" references undefined pipeline\n`,
-    );
-    return 2;
-  }
-  // Remap pipeline failure to exit 2 ONLY for agents that have an
-  // opt-in flag saying "treat exit 2 as stderr-feedback-to-model".
-  // Claude Code and Codex both document this behavior; other agents
-  // in the registry may share Claude's settings.json shape without
-  // sharing its exit-code semantics, and a blanket remap risks
-  // triggering agent-specific behaviors we haven't verified (session
-  // halt, retry loops, etc.). For agents without the flag, pass the
-  // pipeline's exit code through verbatim — that's always at least
-  // as informative as the pre-change behavior. See
-  // AgentHandler.stderrFeedbackOnExit2 for the contract and the
-  // per-agent setting.
-  if (handler.stderrFeedbackOnExit2 && result.exitCode !== 0) {
-    return 2;
-  }
-  return result.exitCode;
+
+  return handler.stderrFeedbackOnExit2 && finalCode !== 0 ? 2 : finalCode;
 }
 
 export async function runHookCommand(
@@ -352,6 +591,11 @@ export function registerHookCommand(
         write: overrides.write ?? defaultRunDeps.write,
         writeErr: overrides.writeErr ?? defaultRunDeps.writeErr,
         load: overrides.load ?? defaultRunDeps.load,
+        ...(overrides.loadProject !== undefined
+          ? { loadProject: overrides.loadProject }
+          : overrides.load === undefined && defaultRunDeps.loadProject
+            ? { loadProject: defaultRunDeps.loadProject }
+            : {}),
         makeGit: overrides.makeGit ?? defaultRunDeps.makeGit,
         exec: overrides.exec ?? defaultRunDeps.exec,
         env: overrides.env ?? defaultRunDeps.env,

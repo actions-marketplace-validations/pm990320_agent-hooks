@@ -13,6 +13,7 @@ import {
   ConfigNotFoundError,
 } from "../../src/config/errors.ts";
 import type { LoadedConfig } from "../../src/config/load.ts";
+import type { LoadedMonorepoProject } from "../../src/config/project.ts";
 import { ConfigSchema } from "../../src/config/schema.ts";
 import { type HookFs } from "../../src/integrations/git/install.ts";
 import { buildStub } from "../../src/integrations/git/stub.ts";
@@ -58,6 +59,40 @@ function loaded(
     ...overrides,
   };
   return () => Promise.resolve(base);
+}
+
+function loadedMonorepoProject(): LoadedMonorepoProject {
+  return {
+    mode: "monorepo",
+    repoRoot: "/repo",
+    root: {
+      config: ConfigSchema.parse({
+        workspaces: ["services/*"],
+        steps: { lint: { run: "eslint {files}" } },
+        pipelines: { ci: { steps: ["lint"] } },
+        git: { hooks: { "pre-commit": { pipeline: "ci" } } },
+      }),
+      sourcePath: "/repo/.config/agent-hooks.yml",
+      localPath: null,
+    },
+    workspaces: [
+      {
+        config: ConfigSchema.parse({
+          steps: { test: { run: "vitest run" } },
+          pipelines: { ci: { steps: ["test"] } },
+          git: { hooks: { "pre-push": { pipeline: "ci" } } },
+        }),
+        sourcePath: "/repo/services/api/.config/agent-hooks.yml",
+        localPath: null,
+        workspaceRoot: "/repo/services/api",
+        relativePath: "services/api",
+        basename: "api",
+        selectors: ["services/api", "api"],
+      },
+    ],
+    currentWorkspace: null,
+    warnings: ["workspace overlap: services/api is nested under services"],
+  };
 }
 
 interface MemHookEntry {
@@ -176,6 +211,25 @@ describe("runDoctor", () => {
     expect(stdout()).toContain("1 steps, 1 pipelines");
     expect(stdout()).toContain("pipeline step references resolve");
     expect(stderr()).toBe("");
+  });
+
+  test("reports monorepo root, workspaces, and overlap warnings", async () => {
+    const hookFs = memHookFs();
+    const { deps, stdout } = fakeDeps({
+      load: loaded(),
+      loadProject: () => Promise.resolve(loadedMonorepoProject()),
+      makeGit: () => stubGitRoot("/repo"),
+      hookFs,
+    });
+
+    const report = await runDoctor(deps);
+    expect(report).toEqual({ ok: true, exitCode: 0 });
+    expect(stdout()).toContain("Monorepo root:");
+    expect(stdout()).toContain("Workspaces discovered: 1");
+    expect(stdout()).toContain("services/api");
+    expect(stdout()).toContain("workspace overlap:");
+    expect(stdout()).toContain("root config loaded");
+    expect(stdout()).toContain("workspace services/api config loaded");
   });
 
   test("mentions local override path when present", async () => {
@@ -379,6 +433,21 @@ describe("runDoctor", () => {
     expect(stdout()).toContain("hash mismatch");
     expect(stdout()).toContain("⊘ pre-push");
     expect(stdout()).toContain("stub missing");
+  });
+
+  test("monorepo git hook checks cover root and workspace hook names", async () => {
+    const hookFs = memHookFs();
+    const { deps, stdout } = fakeDeps({
+      load: loaded(),
+      loadProject: () => Promise.resolve(loadedMonorepoProject()),
+      makeGit: () => stubGitRoot("/repo"),
+      hookFs,
+    });
+
+    const report = await runDoctor(deps);
+    expect(report.ok).toBe(true);
+    expect(stdout()).toContain("pre-commit");
+    expect(stdout()).toContain("pre-push");
   });
 
   test("runs hook fix remediation with --fix and rewrites problematic stubs", async () => {

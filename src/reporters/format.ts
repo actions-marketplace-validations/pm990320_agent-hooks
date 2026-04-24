@@ -14,6 +14,7 @@ export function statusGlyph(outcome: StepOutcome): string {
   const result = outcome.result;
   if (!result) return "?";
   if (result.status === "passed") return "✓";
+  if (result.status === "warned") return "⚠";
   if (result.status === "failed") return "✗";
   return "⊘";
 }
@@ -38,6 +39,9 @@ export function statusLabel(outcome: StepOutcome): string {
   if (!result) return "unknown";
   if (result.status === "skipped") {
     return `skipped (${result.reason ?? ""})`;
+  }
+  if (result.status === "warned") {
+    return `warned (exit ${String(result.exitCode)})`;
   }
   if (result.status === "failed") {
     return `failed (exit ${String(result.exitCode)})`;

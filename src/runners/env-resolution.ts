@@ -164,8 +164,8 @@ export async function resolveEnvironment(
 
   // Config env wins last — user's explicit overrides beat every auto layer.
   if (options.configEnv && Object.keys(options.configEnv).length > 0) {
-    for (const [k, v] of Object.entries(options.configEnv)) {
-      env[k] = v;
+    for (const [key, value] of Object.entries(options.configEnv)) {
+      env[key] = value;
     }
     sources.push({
       kind: "config",
@@ -381,7 +381,7 @@ export function prependPath(path: string, dir: string): string {
   const sep = nodePath.delimiter;
   const parts = path.split(sep);
   if (parts[0] === dir) return path;
-  return `${dir}${sep}${parts.filter((p) => p !== dir).join(sep)}`;
+  return `${dir}${sep}${parts.filter((part) => part !== dir).join(sep)}`;
 }
 
 /**
@@ -402,9 +402,11 @@ export function parseJsonObject(
       return null;
     }
     const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === "string") out[k] = v;
-      else if (typeof v === "number" || typeof v === "boolean") out[k] = String(v);
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === "string") out[key] = value;
+      else if (typeof value === "number" || typeof value === "boolean") {
+        out[key] = String(value);
+      }
     }
     return out;
   } catch {
@@ -419,7 +421,9 @@ async function whichOnPath(
   env: Record<string, string>,
 ): Promise<string | null> {
   const pathEnv = env.PATH ?? "";
-  const dirs = pathEnv.split(nodePath.delimiter).filter((d) => d.length > 0);
+  const dirs = pathEnv
+    .split(nodePath.delimiter)
+    .filter((directory) => directory.length > 0);
   for (const dir of dirs) {
     const candidate = nodePath.join(dir, cmd);
     try {
@@ -433,9 +437,9 @@ async function whichOnPath(
 }
 
 const defaultEnvFs: EnvFs = {
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;

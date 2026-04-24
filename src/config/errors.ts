@@ -18,7 +18,7 @@ export class ConfigNotFoundError extends ConfigError {
 
   constructor(cwd: string, searched: readonly string[]) {
     super(`No agent-hooks config file found under ${cwd}`, {
-      details: `Searched:\n${searched.map((p) => `  - ${p}`).join("\n")}`,
+      details: `Searched:\n${searched.map((searchedPath) => `  - ${searchedPath}`).join("\n")}`,
     });
     this.name = "ConfigNotFoundError";
     this.searched = searched;

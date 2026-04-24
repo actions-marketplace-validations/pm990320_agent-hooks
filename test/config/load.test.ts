@@ -7,8 +7,12 @@ import { ConfigError, ConfigNotFoundError } from "../../src/config/errors.ts";
 import {
   CONFIG_CANDIDATES,
   LOCAL_OVERRIDES,
+  configRootDir,
+  findFirstInDir,
+  findLocalOverrideFor,
   formatZodError,
   loadConfig,
+  loadConfigFromPath,
   parseConfigText,
   type LoaderFs,
 } from "../../src/config/load.ts";
@@ -197,6 +201,21 @@ describe("loadConfig", () => {
       }),
     ).rejects.toThrow(ConfigError);
   });
+
+  test("explicit configPath uses a sibling local override instead of searching from cwd", async () => {
+    const fs = memFs({
+      "/repo/custom/my-config.yaml": `name: base`,
+      "/repo/custom/agent-hooks.local.yml": `name: override`,
+      "/repo/.config/agent-hooks.local.yml": `name: wrong-one`,
+    });
+    const loaded = await loadConfig({
+      cwd: "/repo",
+      configPath: "custom/my-config.yaml",
+      fs,
+    });
+    expect(loaded.config.name).toBe("override");
+    expect(loaded.localPath).toBe("/repo/custom/agent-hooks.local.yml");
+  });
 });
 
 describe("loadConfig — default filesystem", () => {
@@ -246,5 +265,45 @@ describe("CONFIG_CANDIDATES and LOCAL_OVERRIDES", () => {
 
   test("local overrides mirror the main candidates", () => {
     expect(LOCAL_OVERRIDES[0]).toBe(".config/agent-hooks.local.yml");
+  });
+});
+
+describe("load helpers", () => {
+  test("findFirstInDir only searches the requested directory", async () => {
+    const fs = memFs({
+      "/repo/.config/agent-hooks.yml": "name: root",
+      "/repo/sub/agent-hooks.yml": "name: sub",
+    });
+    await expect(
+      findFirstInDir("/repo/sub", CONFIG_CANDIDATES, fs),
+    ).resolves.toBe("/repo/sub/agent-hooks.yml");
+  });
+
+  test("configRootDir maps .config files back to the project root", () => {
+    expect(configRootDir("/repo/.config/agent-hooks.yml")).toBe("/repo");
+    expect(configRootDir("/repo/custom/agent-hooks.yml")).toBe("/repo/custom");
+  });
+
+  test("findLocalOverrideFor resolves local overrides from the config owner dir", async () => {
+    const fs = memFs({
+      "/repo/.config/agent-hooks.local.yml": "name: root",
+      "/repo/custom/agent-hooks.local.yml": "name: custom",
+    });
+    await expect(
+      findLocalOverrideFor("/repo/.config/agent-hooks.yml", fs),
+    ).resolves.toBe("/repo/.config/agent-hooks.local.yml");
+    await expect(
+      findLocalOverrideFor("/repo/custom/agent-hooks.yml", fs),
+    ).resolves.toBe("/repo/custom/agent-hooks.local.yml");
+  });
+
+  test("loadConfigFromPath applies the sibling local override", async () => {
+    const fs = memFs({
+      "/repo/custom/agent-hooks.yml": "name: base",
+      "/repo/custom/agent-hooks.local.yml": "name: override",
+    });
+    const loaded = await loadConfigFromPath("/repo/custom/agent-hooks.yml", fs);
+    expect(loaded.config.name).toBe("override");
+    expect(loaded.localPath).toBe("/repo/custom/agent-hooks.local.yml");
   });
 });

@@ -14,6 +14,8 @@
   waiting 3–10 minutes for a GitHub Actions run
 - Owns its own git hook installation — no wrapper, no separate tool,
   no generated second config to keep in sync
+- Supports service-owned monorepos: root manifest, per-service configs,
+  repo-root coordination, and service-relative paths
 
 ## Install
 
@@ -83,7 +85,7 @@ agent-hooks ci            # run the full pipeline
 ```
 
 `init` detects your stack (bun / npm / pnpm / yarn / uv / poetry /
-cargo / go / deno / terraform / …), writes a starter
+cargo / go / deno / terraform / Helm / KubeLinter / …), writes a starter
 `.config/agent-hooks.yml`, and installs shell stubs into
 `.git/hooks/<name>` that dispatch back into agent-hooks.
 
@@ -120,6 +122,45 @@ pipelines:
 See [docs/pipelines-and-steps.md](./docs/pipelines-and-steps.md)
 for the full `run:` syntax and recipes for Jest, pytest, Go, and
 other test frameworks.
+
+## Monorepos
+
+Use a required root manifest plus service-owned configs:
+
+```text
+root/
+  .config/agent-hooks.yml
+  services/
+    service-a/
+      .config/agent-hooks.yml
+```
+
+Root:
+
+```yaml
+workspaces:
+  - services/*
+
+monorepo:
+  run-workspace-selection-default: affected
+```
+
+Service config paths stay relative to the service root. From either the
+repo root or a workspace subdirectory:
+
+```bash
+agent-hooks ci
+```
+
+runs whole-monorepo CI. For targeted runs, use:
+
+```bash
+agent-hooks run lint --workspace service-a --files services/service-a/src/a.ts
+agent-hooks run services/service-a:lint --changed
+```
+
+See [docs/monorepo.md](./docs/monorepo.md) for the ownership model,
+selectors, migration notes, and hook fan-out rules.
 
 ## The three contexts
 
@@ -186,6 +227,7 @@ are defined.
 
 - [Architecture](./docs/architecture.md)
 - [Configuration](./docs/configuration.md)
+- [Monorepo design](./docs/monorepo.md)
 - [CLI reference](./docs/cli.md)
 - [Pipelines and steps](./docs/pipelines-and-steps.md)
 - [Stack detection](./docs/stack-detection.md)

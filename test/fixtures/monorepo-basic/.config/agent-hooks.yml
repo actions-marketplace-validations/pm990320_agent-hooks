@@ -1,0 +1,30 @@
+name: monorepo-root
+workspaces:
+  - services/*
+monorepo:
+  run-workspace-selection-default: affected
+steps:
+  lint:
+    run: bash scripts/root-lint.sh {files}
+    files: "shared/**/*.txt"
+  root-pre-commit:
+    run: bash scripts/root-hook.sh {files}
+  root-agent-edit:
+    run: bash scripts/root-agent.sh {files}
+pipelines:
+  ci:
+    steps: [lint]
+  pre-commit:
+    steps: [root-pre-commit]
+  agent-edit:
+    steps: [root-agent-edit]
+git:
+  hooks:
+    pre-commit:
+      pipeline: pre-commit
+agents:
+  claude-code:
+    hooks:
+      PostToolUse:
+        - matcher: Edit|Write
+          pipeline: agent-edit

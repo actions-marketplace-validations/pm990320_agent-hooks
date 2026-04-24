@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   defaultSkillFs,
   installSkill,
   loadSkillTemplate,
   resolveSkillPaths,
+  skillTemplateCandidates,
   uninstallSkill,
   type SkillFs,
 } from "../../../src/integrations/skill/install.ts";
@@ -114,6 +116,15 @@ describe("loadSkillTemplate", () => {
     const content = await loadSkillTemplate();
     expect(content).toContain("agent-hooks skill");
     expect(content).toContain("agent-hooks run agent-edit");
+  });
+
+  test("candidate paths cover source and bundled dist layouts", () => {
+    const candidates = skillTemplateCandidates(
+      pathToFileURL("/pkg/dist/index.js").href,
+    );
+    expect(candidates).toContain(
+      "/pkg/templates/skills/agent-hooks.skill.md",
+    );
   });
 });
 

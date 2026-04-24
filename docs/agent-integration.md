@@ -37,6 +37,26 @@ agent-hooks hook <agent> <hook-name> [flags]
    [troubleshooting](./troubleshooting.md#agent-feedback-prompts))
    formatted for that agent
 
+## Monorepo hook dispatch
+
+In monorepo mode, agent hooks are still installed once per repo, but
+dispatch becomes root-aware:
+
+1. agent-hooks loads the parent root manifest when `workspaces:` exists
+2. parses the agent payload once at the repo level
+3. runs any matching **root** agent hook rule
+4. partitions repo-relative files to affected workspaces
+5. runs each affected workspace's own matching hook rule independently
+6. silently skips workspaces with no matching rule
+
+This means:
+
+- service configs own their own agent hook behavior
+- root hook rules run **in addition to** workspace hook rules
+- workspace paths remain relative to the workspace root at runtime
+- invoking an agent from inside a workspace subdirectory still routes
+  through the parent root manifest when one exists
+
 ## Supported agents
 
 Run `agent-hooks agent list` to see every handler that's registered

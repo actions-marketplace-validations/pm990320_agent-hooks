@@ -1,25 +1,45 @@
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 const nodeFs = await import("node:fs/promises");
 
+const SKILL_TEMPLATE_RELATIVE_PATH = path.join(
+  "templates",
+  "skills",
+  "agent-hooks.skill.md",
+);
+
+export function skillTemplateCandidates(moduleUrl = import.meta.url): readonly string[] {
+  const moduleDir = path.dirname(fileURLToPath(moduleUrl));
+  return [
+    // Source layout: src/integrations/skill/install.ts → repo root.
+    path.join(moduleDir, "..", "..", "..", SKILL_TEMPLATE_RELATIVE_PATH),
+    // Bundled npm layout: dist/index.js → package root.
+    path.join(moduleDir, "..", SKILL_TEMPLATE_RELATIVE_PATH),
+  ];
+}
+
 /**
  * Load the shipped skill template from the package's `templates/skills/`
- * directory. We resolve the path relative to this module so the same
- * code works whether we're running from source (via `bun src/index.ts`)
- * or from a bundled dist.
+ * directory. Source runs resolve from `src/integrations/skill/`; bundled
+ * npm runs resolve from `dist/`. Use `import.meta.url` rather than
+ * Bun-only `import.meta.dir` so the published Node entrypoint works too.
  */
 export async function loadSkillTemplate(): Promise<string> {
-  const templatePath = path.join(
-    import.meta.dir,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "skills",
-    "agent-hooks.skill.md",
+  const attemptedPaths: string[] = [];
+  for (const templatePath of skillTemplateCandidates()) {
+    attemptedPaths.push(templatePath);
+    try {
+      return await nodeFs.readFile(templatePath, "utf8");
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    }
+  }
+  throw new Error(
+    `agent-hooks skill template not found; tried ${attemptedPaths.join(", ")}`,
   );
-  return nodeFs.readFile(templatePath, "utf8");
 }
 
 export type SkillTarget = "claude" | "cursor" | "codex";
@@ -73,29 +93,29 @@ export function resolveSkillPaths(
 }
 
 export interface SkillFs {
-  mkdirRecursive(p: string): Promise<void>;
-  write(p: string, contents: string): Promise<void>;
-  exists(p: string): Promise<boolean>;
-  remove(p: string): Promise<void>;
+  mkdirRecursive(dirPath: string): Promise<void>;
+  write(filePath: string, contents: string): Promise<void>;
+  exists(filePath: string): Promise<boolean>;
+  remove(filePath: string): Promise<void>;
 }
 
 export const defaultSkillFs: SkillFs = {
-  async mkdirRecursive(p) {
-    await nodeFs.mkdir(p, { recursive: true });
+  async mkdirRecursive(dirPath) {
+    await nodeFs.mkdir(dirPath, { recursive: true });
   },
-  async write(p, contents) {
-    await nodeFs.writeFile(p, contents, "utf8");
+  async write(filePath, contents) {
+    await nodeFs.writeFile(filePath, contents, "utf8");
   },
-  async exists(p) {
+  async exists(filePath) {
     try {
-      await nodeFs.access(p);
+      await nodeFs.access(filePath);
       return true;
     } catch {
       return false;
     }
   },
-  async remove(p) {
-    await nodeFs.unlink(p);
+  async remove(filePath) {
+    await nodeFs.unlink(filePath);
   },
 };
 

@@ -14,8 +14,10 @@ export interface AgentDispatchOptions {
   readonly input: NormalizedHookInput;
   readonly config: Config;
   readonly cwd: string;
+  readonly repoRoot?: string;
   readonly env: Record<string, string>;
   readonly git: GitRunner;
+  readonly resolvedFiles?: readonly string[];
   readonly exec: ExecFn;
   readonly reporter: Reporter;
 }
@@ -93,8 +95,10 @@ export async function dispatchAgentHook(
   // fall back to the git "changed" scope so Stop/UserPromptSubmit-style
   // hooks still target something meaningful.
   const resolved =
-    options.input.files.length > 0
-      ? { scope: "explicit" as const, files: options.input.files }
+    options.resolvedFiles !== undefined
+      ? { scope: "explicit" as const, files: options.resolvedFiles }
+      : options.input.files.length > 0
+        ? { scope: "explicit" as const, files: options.input.files }
       : await resolveFiles(options.git, { scope: "changed" });
 
   options.reporter.pipelineStart(rule.pipeline);
@@ -104,6 +108,7 @@ export async function dispatchAgentHook(
       config: options.config,
       files: resolved.files,
       cwd: options.cwd,
+      ...(options.repoRoot ? { repoRoot: options.repoRoot } : {}),
       env: options.env,
       onStepStart: (info) => options.reporter.stepStart(info),
       onStepEnd: (outcome) => options.reporter.stepEnd(outcome),

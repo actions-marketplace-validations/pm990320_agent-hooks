@@ -11,6 +11,7 @@ import {
   ConfigNotFoundError,
 } from "../../src/config/errors.ts";
 import type { LoadedConfig } from "../../src/config/load.ts";
+import type { LoadedMonorepoProject } from "../../src/config/project.ts";
 import { ConfigSchema } from "../../src/config/schema.ts";
 
 function fakeDeps(overrides: Partial<ListCommandDeps> = {}): {
@@ -185,6 +186,41 @@ describe("runListCommand", () => {
       load: () => Promise.reject(new TypeError("boom")),
     });
     await expect(runListCommand(deps)).rejects.toThrow(TypeError);
+  });
+
+  test("groups root and workspace targets in monorepo mode", async () => {
+    const monorepo: LoadedMonorepoProject = {
+      mode: "monorepo",
+      repoRoot: "/repo",
+      root: loadedFixture(),
+      workspaces: [
+        {
+          config: ConfigSchema.parse({
+            name: "service-a",
+            steps: { lint: { run: "eslint {files}" } },
+            pipelines: { ci: { steps: ["lint"] } },
+          }),
+          sourcePath: "/repo/services/service-a/.config/agent-hooks.yml",
+          localPath: null,
+          workspaceRoot: "/repo/services/service-a",
+          relativePath: "services/service-a",
+          basename: "service-a",
+          selectors: ["services/service-a", "service-a"],
+        },
+      ],
+      currentWorkspace: null,
+      warnings: ["workspace overlap: services/service-a is nested under services"],
+    };
+
+    const { deps, out } = fakeDeps({
+      loadProject: () => Promise.resolve(monorepo),
+    });
+
+    expect(await runListCommand(deps)).toBe(0);
+    expect(out()).toContain("project mode: monorepo");
+    expect(out()).toContain("root config:");
+    expect(out()).toContain("workspace services/service-a:");
+    expect(out()).toContain("workspace overlap:");
   });
 });
 

@@ -52,9 +52,9 @@ export const AGENT_HANDLERS: readonly AgentHandler[] = [
 ];
 
 export function getAgentHandler(name: string): AgentHandler | null {
-  return AGENT_HANDLERS.find((h) => h.name === name) ?? null;
+  return AGENT_HANDLERS.find((handler) => handler.name === name) ?? null;
 }
 
 export function listAgentNames(): readonly string[] {
-  return AGENT_HANDLERS.map((h) => h.name);
+  return AGENT_HANDLERS.map((handler) => handler.name);
 }

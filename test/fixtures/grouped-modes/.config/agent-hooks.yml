@@ -1,0 +1,43 @@
+name: grouped-modes
+steps:
+  terraform-validate:
+    run: bash scripts/record-group.sh TF {dir} {files}
+    files: "**/*.tf"
+    invocation: per-directory
+    dir-from: parent
+    parallel: 2
+  helm-lint:
+    run: bash scripts/record-group.sh HELM {dir} {files}
+    files: "**/*.yaml"
+    invocation: per-marker-dir
+    marker: Chart.yaml
+    exclude-ancestors: charts
+    parallel: 2
+  repo-root-check:
+    run: bash scripts/record-repo-root.sh {repo-root} {git_root} {repo_root}
+    invocation: project
+  informational:
+    run: bash scripts/fail-info.sh {dir}
+    files: "**/*.tf"
+    invocation: per-directory
+    dir-from: parent
+    parallel: 2
+    on-failure: warn
+  missing-config-guard:
+    run: bash scripts/record-group.sh GUARD . {files}
+    invocation: project
+    requires:
+      - file: .tflint.hcl
+    on-missing: skip
+pipelines:
+  grouped:
+    steps: [terraform-validate, helm-lint]
+  grouped-parallel:
+    steps: [terraform-validate, helm-lint]
+    parallel: true
+  repo-root:
+    steps: [repo-root-check]
+  info:
+    steps: [informational]
+  guard:
+    steps: [missing-config-guard]

@@ -8,6 +8,7 @@ import {
 } from "../../src/commands/install.ts";
 import { ConfigError, ConfigNotFoundError } from "../../src/config/errors.ts";
 import type { LoadedConfig } from "../../src/config/load.ts";
+import type { LoadedMonorepoProject } from "../../src/config/project.ts";
 import { ConfigSchema } from "../../src/config/schema.ts";
 import type { HookFs } from "../../src/integrations/git/install.ts";
 
@@ -42,6 +43,42 @@ function stubLoaded(): LoadedConfig {
     }),
     sourcePath: "/repo/.config/agent-hooks.yml",
     localPath: null,
+  };
+}
+
+function monorepoLoaded(
+  workspacePipeline = "workspace-pre-push",
+): LoadedMonorepoProject {
+  return {
+    mode: "monorepo",
+    repoRoot: "/repo",
+    root: {
+      config: ConfigSchema.parse({
+        workspaces: ["services/*"],
+        steps: { lint: { run: "echo" } },
+        pipelines: { "pre-commit": { steps: ["lint"] } },
+        git: { hooks: { "pre-commit": { pipeline: "pre-commit" } } },
+      }),
+      sourcePath: "/repo/.config/agent-hooks.yml",
+      localPath: null,
+    },
+    workspaces: [
+      {
+        config: ConfigSchema.parse({
+          steps: { lint: { run: "echo" } },
+          pipelines: { [workspacePipeline]: { steps: ["lint"] } },
+          git: { hooks: { "pre-push": { pipeline: workspacePipeline } } },
+        }),
+        sourcePath: "/repo/services/api/.config/agent-hooks.yml",
+        localPath: null,
+        workspaceRoot: "/repo/services/api",
+        relativePath: "services/api",
+        basename: "api",
+        selectors: ["services/api", "api"],
+      },
+    ],
+    currentWorkspace: null,
+    warnings: [],
   };
 }
 
@@ -175,6 +212,59 @@ describe("runInstallCommand", () => {
         },
       ),
     ).rejects.toThrow(TypeError);
+  });
+
+  test("monorepo install writes the union of root and workspace hook stubs", async () => {
+    const fsMem = memFs();
+    const code = await runInstallCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        writeErr: () => {},
+        load: () => Promise.resolve(stubLoaded()),
+        loadProject: () => Promise.resolve(monorepoLoaded()),
+        hookFs: fsMem,
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(fsMem.files.has("/repo/.git/hooks/pre-commit")).toBe(true);
+    expect(fsMem.files.has("/repo/.git/hooks/pre-push")).toBe(true);
+  });
+
+  test("monorepo install hash drifts when a workspace hook config changes", async () => {
+    const fsMem = memFs();
+    await runInstallCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        writeErr: () => {},
+        load: () => Promise.resolve(stubLoaded()),
+        loadProject: () => Promise.resolve(monorepoLoaded("workspace-pre-push")),
+        hookFs: fsMem,
+      },
+    );
+
+    let out = "";
+    const code = await runInstallCommand(
+      { ifMissing: true },
+      {
+        cwd: "/repo",
+        write: (text) => {
+          out += text;
+        },
+        writeErr: () => {},
+        load: () => Promise.resolve(stubLoaded()),
+        loadProject: () =>
+          Promise.resolve(monorepoLoaded("workspace-pre-push-updated")),
+        hookFs: fsMem,
+      },
+    );
+
+    expect(code).toBe(0);
+    expect(out).toContain("updated");
   });
 });
 

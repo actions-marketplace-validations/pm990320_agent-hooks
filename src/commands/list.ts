@@ -13,6 +13,7 @@ import type { Command } from "commander";
 import { ExitError } from "../cli.ts";
 import { ConfigError, ConfigNotFoundError } from "../config/errors.ts";
 import { loadConfig, type LoadedConfig } from "../config/load.ts";
+import { loadProjectConfig, type LoadedProject } from "../config/project.ts";
 import type { Pipeline, Step } from "../config/schema.ts";
 
 export interface ListCommandDeps {
@@ -20,12 +21,17 @@ export interface ListCommandDeps {
   readonly write: (text: string) => void;
   readonly writeErr: (text: string) => void;
   readonly load: (cwd: string) => Promise<LoadedConfig>;
+  readonly loadProject?: (cwd: string) => Promise<LoadedProject>;
 }
 
 export async function runListCommand(deps: ListCommandDeps): Promise<number> {
-  let loaded: LoadedConfig;
+  let project: LoadedProject;
   try {
-    loaded = await deps.load(deps.cwd);
+    if (deps.loadProject) {
+      project = await deps.loadProject(deps.cwd);
+    } else {
+      project = { mode: "single", loaded: await deps.load(deps.cwd) };
+    }
   } catch (err) {
     if (err instanceof ConfigNotFoundError || err instanceof ConfigError) {
       deps.writeErr(`✗ ${err.message}\n`);
@@ -35,34 +41,73 @@ export async function runListCommand(deps: ListCommandDeps): Promise<number> {
     throw err;
   }
 
+  if (project.mode === "monorepo") {
+    deps.write(`project mode: monorepo\n`);
+    deps.write(`root config: ${project.root.sourcePath}\n`);
+    deps.write(`workspaces (${String(project.workspaces.length)}):\n`);
+    for (const workspace of project.workspaces) {
+      deps.write(`  - ${workspace.relativePath} (${workspace.sourcePath})\n`);
+    }
+    for (const warning of project.warnings) {
+      deps.write(`  ⚠ ${warning}\n`);
+    }
+    deps.write("\n");
+    writeConfigListing(deps.write, "root", project.root);
+    for (const workspace of project.workspaces) {
+      deps.write("\n");
+      writeConfigListing(
+        deps.write,
+        `workspace ${workspace.relativePath}`,
+        workspace,
+      );
+    }
+    return 0;
+  }
+
+  writeConfigListing(deps.write, null, project.loaded);
+  return 0;
+}
+
+function writeConfigListing(
+  write: (text: string) => void,
+  heading: string | null,
+  loaded: LoadedConfig,
+): void {
   const config = loaded.config;
   const stepEntries = Object.entries(config.steps);
   const pipelineEntries = Object.entries(config.pipelines);
 
-  if (config.name) {
-    deps.write(`project: ${config.name}\n\n`);
+  if (heading) {
+    write(`${heading}:\n`);
+    write(`  config: ${loaded.sourcePath}\n`);
+    if (loaded.localPath) {
+      write(`  local override: ${loaded.localPath}\n`);
+    }
   }
 
-  deps.write(`steps (${String(stepEntries.length)}):\n`);
+  if (config.name) {
+    write(`project: ${config.name}\n\n`);
+  }
+
+  write(`steps (${String(stepEntries.length)}):\n`);
   if (stepEntries.length === 0) {
-    deps.write(`  (none defined)\n`);
+    write(`  (none defined)\n`);
   } else {
     const nameWidth = longest(stepEntries.map(([name]) => name));
     for (const [name, step] of stepEntries) {
-      deps.write(formatStepLine(name, step, nameWidth));
+      write(formatStepLine(name, step, nameWidth));
     }
   }
 
-  deps.write(`\npipelines (${String(pipelineEntries.length)}):\n`);
+  write(`\npipelines (${String(pipelineEntries.length)}):\n`);
   if (pipelineEntries.length === 0) {
-    deps.write(`  (none defined)\n`);
+    write(`  (none defined)\n`);
   } else {
     const nameWidth = longest(pipelineEntries.map(([name]) => name));
     for (const [name, pipeline] of pipelineEntries) {
-      deps.write(formatPipelineLine(name, pipeline, nameWidth));
+      write(formatPipelineLine(name, pipeline, nameWidth));
     }
   }
-  return 0;
 }
 
 function longest(names: readonly string[]): number {
@@ -116,6 +161,13 @@ export function registerListCommand(
         writeErr:
           overrides.writeErr ?? ((text) => process.stderr.write(text)),
         load: overrides.load ?? ((cwd) => loadConfig({ cwd })),
+        ...(
+          overrides.loadProject !== undefined
+            ? { loadProject: overrides.loadProject }
+            : overrides.load === undefined
+              ? { loadProject: (cwd: string) => loadProjectConfig({ cwd }) }
+              : {}
+        ),
       };
       const code = await runListCommand(deps);
       if (code !== 0) throw new ExitError(code);

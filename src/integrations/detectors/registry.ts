@@ -5,6 +5,11 @@ import {
   yarnDetector,
 } from "./node.ts";
 import {
+  helmDetector,
+  kubeLinterDetector,
+  terraformDetector,
+} from "./infra.ts";
+import {
   pythonPipenvDetector,
   pythonPoetryDetector,
   pythonUvDetector,
@@ -28,12 +33,15 @@ export const DETECTORS: readonly Detector[] = [
   rustDetector,
   goDetector,
   denoDetector,
+  terraformDetector,
+  helmDetector,
+  kubeLinterDetector,
 ];
 
 export function getDetector(name: string): Detector | null {
-  return DETECTORS.find((d) => d.name === name) ?? null;
+  return DETECTORS.find((detector) => detector.name === name) ?? null;
 }
 
 export function listDetectorNames(): readonly string[] {
-  return DETECTORS.map((d) => d.name);
+  return DETECTORS.map((detector) => detector.name);
 }

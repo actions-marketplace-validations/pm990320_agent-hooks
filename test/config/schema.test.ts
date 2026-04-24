@@ -60,6 +60,24 @@ describe("StepSchema — optional fields and defaults", () => {
     }
   });
 
+  test("accepts grouped invocation fields for per-directory and per-marker-dir", () => {
+    const perDirectory = StepSchema.parse({
+      run: "terraform -chdir={dir} validate",
+      invocation: "per-directory",
+      "dir-from": "parent",
+    });
+    expect(perDirectory["dir-from"]).toBe("parent");
+
+    const perMarker = StepSchema.parse({
+      run: "helm lint {dir}",
+      invocation: "per-marker-dir",
+      marker: ["Chart.yaml", "go.mod"],
+      "exclude-ancestors": "charts",
+    });
+    expect(perMarker.marker).toEqual(["Chart.yaml", "go.mod"]);
+    expect(perMarker["exclude-ancestors"]).toBe("charts");
+  });
+
   test("accepts chunk and parallel positive integers", () => {
     const step = StepSchema.parse({ run: "x", chunk: 200, parallel: 8 });
     expect(step.chunk).toBe(200);
@@ -76,6 +94,13 @@ describe("StepSchema — optional fields and defaults", () => {
     for (const mode of ["warn", "warn-skip", "skip", "fail"] as const) {
       const step = StepSchema.parse({ run: "x", "on-missing": mode });
       expect(step["on-missing"]).toBe(mode);
+    }
+  });
+
+  test("accepts every on-failure mode", () => {
+    for (const mode of ["warn", "fail"] as const) {
+      const step = StepSchema.parse({ run: "x", "on-failure": mode });
+      expect(step["on-failure"]).toBe(mode);
     }
   });
 
@@ -181,6 +206,48 @@ describe("StepSchema — optional fields and defaults", () => {
 
   test("rejects unknown step fields (strict)", () => {
     expect(() => StepSchema.parse({ run: "x", nope: 1 })).toThrow();
+  });
+
+  test("rejects per-directory without dir-from", () => {
+    expect(() =>
+      StepSchema.parse({
+        run: "terraform -chdir={dir} validate",
+        invocation: "per-directory",
+      }),
+    ).toThrow();
+  });
+
+  test("rejects per-marker-dir without marker", () => {
+    expect(() =>
+      StepSchema.parse({
+        run: "helm lint {dir}",
+        invocation: "per-marker-dir",
+      }),
+    ).toThrow();
+  });
+
+  test("rejects grouped-only fields on non-grouped invocation modes", () => {
+    expect(() =>
+      StepSchema.parse({
+        run: "eslint {files}",
+        invocation: "args",
+        "dir-from": "parent",
+      }),
+    ).toThrow();
+    expect(() =>
+      StepSchema.parse({
+        run: "eslint {files}",
+        invocation: "args",
+        marker: "Chart.yaml",
+      }),
+    ).toThrow();
+    expect(() =>
+      StepSchema.parse({
+        run: "eslint {files}",
+        invocation: "args",
+        "exclude-ancestors": "charts",
+      }),
+    ).toThrow();
   });
 });
 
@@ -315,6 +382,31 @@ describe("ConfigSchema — root", () => {
     });
     expect(config.env?.NODE_ENV).toBe("development");
     expect(config.steps.lint?.env?.CUSTOM).toBe("value");
+  });
+
+  test("accepts workspaces at the root", () => {
+    const config = ConfigSchema.parse({
+      workspaces: ["services/*", "packages/api"],
+    });
+    expect(config.workspaces).toEqual(["services/*", "packages/api"]);
+  });
+
+  test("accepts monorepo config with default dispatch mode", () => {
+    const config = ConfigSchema.parse({ monorepo: {} });
+    expect(config.monorepo?.["run-workspace-selection-default"]).toBe(
+      "affected",
+    );
+  });
+
+  test("accepts every monorepo run-workspace-selection-default value", () => {
+    for (const value of ["affected", "all"] as const) {
+      const config = ConfigSchema.parse({
+        monorepo: { "run-workspace-selection-default": value },
+      });
+      expect(config.monorepo?.["run-workspace-selection-default"]).toBe(
+        value,
+      );
+    }
   });
 
   test("rejects unknown root fields (strict)", () => {
