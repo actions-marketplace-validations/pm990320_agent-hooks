@@ -1,25 +1,45 @@
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 const nodeFs = await import("node:fs/promises");
 
+const SKILL_TEMPLATE_RELATIVE_PATH = path.join(
+  "templates",
+  "skills",
+  "agent-hooks.skill.md",
+);
+
+export function skillTemplateCandidates(moduleUrl = import.meta.url): readonly string[] {
+  const moduleDir = path.dirname(fileURLToPath(moduleUrl));
+  return [
+    // Source layout: src/integrations/skill/install.ts → repo root.
+    path.join(moduleDir, "..", "..", "..", SKILL_TEMPLATE_RELATIVE_PATH),
+    // Bundled npm layout: dist/index.js → package root.
+    path.join(moduleDir, "..", SKILL_TEMPLATE_RELATIVE_PATH),
+  ];
+}
+
 /**
  * Load the shipped skill template from the package's `templates/skills/`
- * directory. We resolve the path relative to this module so the same
- * code works whether we're running from source (via `bun src/index.ts`)
- * or from a bundled dist.
+ * directory. Source runs resolve from `src/integrations/skill/`; bundled
+ * npm runs resolve from `dist/`. Use `import.meta.url` rather than
+ * Bun-only `import.meta.dir` so the published Node entrypoint works too.
  */
 export async function loadSkillTemplate(): Promise<string> {
-  const templatePath = path.join(
-    import.meta.dir,
-    "..",
-    "..",
-    "..",
-    "templates",
-    "skills",
-    "agent-hooks.skill.md",
+  const attemptedPaths: string[] = [];
+  for (const templatePath of skillTemplateCandidates()) {
+    attemptedPaths.push(templatePath);
+    try {
+      return await nodeFs.readFile(templatePath, "utf8");
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    }
+  }
+  throw new Error(
+    `agent-hooks skill template not found; tried ${attemptedPaths.join(", ")}`,
   );
-  return nodeFs.readFile(templatePath, "utf8");
 }
 
 export type SkillTarget = "claude" | "cursor" | "codex";

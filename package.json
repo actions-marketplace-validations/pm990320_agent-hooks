@@ -26,6 +26,7 @@
   },
   "files": [
     "dist",
+    "templates",
     "schema.json",
     "README.md",
     "LICENSE"

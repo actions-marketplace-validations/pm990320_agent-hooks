@@ -62,6 +62,9 @@ export function buildProgram(): Command {
 export async function runProgram(
   program: Command,
   argv: readonly string[],
+  writeErr: (text: string) => void = (text) => {
+    process.stderr.write(text);
+  },
 ): Promise<number> {
   try {
     await program.parseAsync(argv, { from: "user" });
@@ -69,6 +72,8 @@ export async function runProgram(
   } catch (err) {
     if (err instanceof CommanderError) return err.exitCode;
     if (err instanceof ExitError) return err.exitCode;
+    const message = err instanceof Error ? err.message : String(err);
+    writeErr(`✗ ${message}\n`);
     return 1;
   }
 }
