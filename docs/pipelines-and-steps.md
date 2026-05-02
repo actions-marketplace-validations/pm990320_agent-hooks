@@ -230,12 +230,16 @@ lint:
 
 **Biome** (JavaScript / TypeScript / JSON / CSS):
 
+`agent-hooks init` detects Biome from `biome.json`, `biome.jsonc`, or
+`@biomejs/biome` in `package.json` dependencies and scaffolds this as the
+primary Node-family lint step when Biome is present.
+
 ```yaml
 lint:
   run:
     files: biome check {files}
     project: biome check .
-  files: "**/*.{ts,tsx,js,jsx,json,css}"
+  files: "**/*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc,css}"
 ```
 
 **Prettier** (formatting check):

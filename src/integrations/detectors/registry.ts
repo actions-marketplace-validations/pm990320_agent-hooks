@@ -1,3 +1,4 @@
+import { biomeDetector } from "./biome.ts";
 import {
   bunDetector,
   npmDetector,
@@ -23,6 +24,7 @@ import type { Detector } from "./types.ts";
  * detectors get their colliding step names prefixed.
  */
 export const DETECTORS: readonly Detector[] = [
+  biomeDetector,
   bunDetector,
   pnpmDetector,
   yarnDetector,

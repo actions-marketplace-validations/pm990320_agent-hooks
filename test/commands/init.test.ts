@@ -133,6 +133,29 @@ describe("runInitCommand — detector-driven templates", () => {
     expect(out).toContain("detect  node-bun");
   });
 
+  test("Biome + npm project: scaffolds Biome lint plus npm lifecycle steps", async () => {
+    const memFs = mem();
+    memFs.files.set("/repo/package-lock.json", "");
+    memFs.files.set("/repo/biome.json", "{}");
+    const { outcome } = await runInitCommand(
+      {},
+      {
+        cwd: "/repo",
+        write: () => {},
+        fs: memFs.initFs,
+        hookFs: memFs.hookFs,
+        postinstallFs: memFs.postinstallFs,
+      },
+    );
+    expect(outcome.detectors).toEqual(["biome", "node-npm"]);
+    const written = memFs.files.get("/repo/.config/agent-hooks.yml");
+    expect(written).toContain("biome check {files}");
+    expect(written).toContain("biome check .");
+    expect(written).not.toContain("eslint");
+    expect(written).toContain("npx tsc --noEmit");
+    expect(written).toContain("npm install");
+  });
+
   test("python uv project: scaffolds ruff/mypy/pytest steps", async () => {
     const memFs = mem();
     memFs.files.set("/repo/pyproject.toml", "");

@@ -23,6 +23,7 @@ function memFs(files: Record<string, string>): DetectorFs {
 describe("registry", () => {
   test("DETECTORS contains all expected stack detectors", () => {
     const names = DETECTORS.map((d) => d.name);
+    expect(names).toContain("biome");
     expect(names).toContain("node-bun");
     expect(names).toContain("node-pnpm");
     expect(names).toContain("node-yarn");
@@ -57,6 +58,37 @@ describe("mergeDetectors", () => {
     expect(merged.detectorNames).toEqual([]);
     expect(merged.steps).toEqual({});
     expect(merged.pipelines).toEqual({});
+  });
+
+  test("merges a single biome detector fragment", async () => {
+    const merged = await mergeDetectors({
+      cwd: "/repo",
+      fs: memFs({ "/repo/biome.json": "{}" }),
+    });
+    expect(merged.detectorNames).toEqual(["biome"]);
+    expect(merged.steps["lint"]?.run).toEqual({
+      files: "biome check {files}",
+      project: "biome check .",
+    });
+  });
+
+  test("merges Biome with Node without an extra ESLint lint step", async () => {
+    const merged = await mergeDetectors({
+      cwd: "/repo",
+      fs: memFs({
+        "/repo/biome.json": "{}",
+        "/repo/package-lock.json": "",
+      }),
+    });
+    expect(merged.detectorNames).toEqual(["biome", "node-npm"]);
+    expect(Object.keys(merged.steps)).toContain("lint");
+    expect(Object.keys(merged.steps)).not.toContain("node-npm:lint");
+    expect(merged.pipelines["ci"]?.steps).toEqual([
+      "lint",
+      "typecheck",
+      "test",
+      "build",
+    ]);
   });
 
   test("merges a single bun detector fragment", async () => {

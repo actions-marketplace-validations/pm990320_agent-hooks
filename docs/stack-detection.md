@@ -8,6 +8,7 @@ apply to one repo.
 
 | Detector | Signals | Steps added |
 |---|---|---|
+| `biome` | `biome.json`, `biome.jsonc`, or `@biomejs/biome` / `biome` in `package.json` dependencies | `lint` via `biome check` for JavaScript / TypeScript / JSON / CSS |
 | `bun` | `bun.lockb`, `bunfig.toml`, `packageManager: bun@…` | `lint`, `test`, `build`, `typecheck`, `install` — all via `bun run …` |
 | `node-npm` | `package-lock.json` | same shape via `npm run …` / `npx` |
 | `node-pnpm` | `pnpm-lock.yaml` | `pnpm …` variants |
@@ -31,6 +32,11 @@ modes:
   vendored nested charts can be skipped with `exclude-ancestors: charts`.
 
 ## Auto-wired hooks
+
+Biome detection composes with Node-family package-manager detection. When both
+Biome and a Node detector fire, the generated `lint` step uses
+`biome check` and the Node detector still contributes typecheck, test,
+build, install, and auto-reinstall wiring.
 
 For Node/Bun/pnpm/yarn and Python uv/poetry detectors, `init`
 additionally wires a `post-merge` hook that runs the matching

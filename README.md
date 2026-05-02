@@ -84,7 +84,7 @@ agent-hooks doctor        # sanity check
 agent-hooks ci            # run the full pipeline
 ```
 
-`init` detects your stack (bun / npm / pnpm / yarn / uv / poetry /
+`init` detects your stack (Biome / bun / npm / pnpm / yarn / uv / poetry /
 cargo / go / deno / terraform / Helm / KubeLinter / …), writes a starter
 `.config/agent-hooks.yml`, and installs shell stubs into
 `.git/hooks/<name>` that dispatch back into agent-hooks.

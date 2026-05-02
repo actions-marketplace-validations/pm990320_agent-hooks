@@ -32,7 +32,7 @@ Then scaffold the config:
 agent-hooks init
 ```
 
-`init` auto-detects the stack (bun/npm/pnpm/yarn/uv/poetry/cargo/go/deno),
+`init` auto-detects the stack (Biome/bun/npm/pnpm/yarn/uv/poetry/cargo/go/deno),
 writes `.config/agent-hooks.yml`, and installs git hook stubs.
 
 ## The three pipelines
@@ -132,12 +132,17 @@ lint:
 ```
 
 **Biome:**
+
+`init` detects Biome from `biome.json`, `biome.jsonc`, or
+`@biomejs/biome` in `package.json` dependencies. When combined with a
+Node package-manager detector, Biome becomes the primary `lint` step while
+the Node detector still contributes typecheck/test/build/install wiring.
 ```yaml
 lint:
   run:
     files: biome check {files}
     project: biome check .
-  files: "**/*.{ts,tsx,js,jsx,json,css}"
+  files: "**/*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc,css}"
 ```
 
 **Ruff** (Python):

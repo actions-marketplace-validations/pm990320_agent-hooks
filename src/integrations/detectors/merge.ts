@@ -30,6 +30,19 @@ export interface MergedFragment {
  * Pipelines with the same name union their step lists, dedup-ing
  * references but preserving order.
  */
+function isBiomeLintStep(
+  step: NonNullable<DetectorFragment["steps"]>[string],
+): boolean {
+  const run = step.run;
+  if (typeof run === "string") return run.includes("biome check");
+  return (run.files?.includes("biome check") ?? false) ||
+    (run.project?.includes("biome check") ?? false);
+}
+
+function isNodeDetectorName(name: string): boolean {
+  return name.startsWith("node-");
+}
+
 export async function mergeDetectors(
   ctx: DetectorContext,
   detectors: readonly Detector[] = DETECTORS,
@@ -47,6 +60,15 @@ export async function mergeDetectors(
 
     // Steps: first wins. Collisions get `<detector>:<step>` prefix.
     for (const [name, step] of Object.entries(fragment.steps ?? {})) {
+      const existingStep = steps[name];
+      if (
+        name === "lint" &&
+        existingStep !== undefined &&
+        isBiomeLintStep(existingStep) &&
+        isNodeDetectorName(detector.name)
+      ) {
+        continue;
+      }
       const key = name in steps ? `${detector.name}:${name}` : name;
       steps[key] = step;
     }
