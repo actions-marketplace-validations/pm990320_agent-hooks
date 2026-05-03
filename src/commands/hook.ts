@@ -366,11 +366,19 @@ async function runRegisteredAgent(
     return 2;
   }
 
+  const stdin = await deps.readStdin();
+  const input = handler.parseInput(stdin);
+  const skipReason = handler.shouldSkipHook?.(hookName, input) ?? null;
+  if (skipReason) {
+    if (deps.env.AGENT_HOOKS_DEBUG === "1") {
+      deps.writeErr(`  ${agentName}/${hookName}: skipped (${skipReason})\n`);
+    }
+    return 0;
+  }
+
   const project = await loadProjectOrReport(deps);
   if (typeof project === "number") return project;
 
-  const stdin = await deps.readStdin();
-  const input = handler.parseInput(stdin);
   const agentKey = configKeyFor(agentName);
 
   if (project.mode === "single") {

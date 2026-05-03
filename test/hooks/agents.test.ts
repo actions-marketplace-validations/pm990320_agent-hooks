@@ -45,21 +45,20 @@ describe("claude handler", () => {
 });
 
 describe("codex handler", () => {
-  // Codex's PostToolUse only emits for the Bash tool as of early
-  // 2026 (file-editing hooks tracked upstream). Use a Bash payload
-  // so the sample is faithful to what real Codex runs will send.
-  const CODEX_BASH_SAMPLE = JSON.stringify({
+  // Codex reports file edits as apply_patch while non-file-changing
+  // tools such as Bash are filtered before dispatch.
+  const CODEX_APPLY_PATCH_SAMPLE = JSON.stringify({
     hook_event_name: "PostToolUse",
-    tool_name: "Bash",
-    tool_input: { command: "ls -la" },
-    tool_response: "total 0",
+    tool_name: "apply_patch",
+    tool_input: { command: "*** Begin Patch\\n*** End Patch" },
+    tool_response: "patched",
     session_id: "test-session",
   });
   runAgentSmokeTests(codex, {
     configKey: "codex",
     sampleEvent: "PostToolUse",
-    sampleInput: CODEX_BASH_SAMPLE,
-    expectedToolName: "Bash",
+    sampleInput: CODEX_APPLY_PATCH_SAMPLE,
+    expectedToolName: "apply_patch",
   });
 });
 

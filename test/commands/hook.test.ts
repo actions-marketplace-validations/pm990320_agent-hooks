@@ -80,6 +80,29 @@ function stubLoadedWithCline(): LoadedConfig {
   };
 }
 
+function stubLoadedWithCodex(): LoadedConfig {
+  return {
+    config: ConfigSchema.parse({
+      steps: { lint: { run: "echo lint {files}" } },
+      pipelines: { "agent-edit": { steps: ["lint"] } },
+      agents: {
+        codex: {
+          hooks: {
+            PostToolUse: [
+              {
+                matcher: "apply_patch|Edit|Write|MultiEdit|Bash",
+                pipeline: "agent-edit",
+              },
+            ],
+          },
+        },
+      },
+    }),
+    sourcePath: "/repo/.config/agent-hooks.yml",
+    localPath: null,
+  };
+}
+
 function fakeExec(exit = 0, seenOutputModes?: string[]): ExecFn {
   return (input) => {
     if (input.output) seenOutputModes?.push(input.output);
@@ -643,6 +666,64 @@ describe("runHookCommand — exit-code remap opt-in", () => {
       env: {},
     });
     expect(code).toBe(7);
+  });
+});
+
+describe("runHookCommand — codex agent", () => {
+  test("fast-skips Bash PostToolUse before loading config", async () => {
+    let loaded = false;
+    let execCount = 0;
+    let err = "";
+    const code = await runHookCommand("codex", "PostToolUse", {
+      cwd: "/repo",
+      write: () => {},
+      writeErr: (t) => {
+        err += t;
+      },
+      load: () => {
+        loaded = true;
+        return Promise.resolve(stubLoadedWithCodex());
+      },
+      makeGit: () => stubGit(["src/a.ts"]),
+      exec: (input) => {
+        execCount += 1;
+        return fakeExec(0)(input);
+      },
+      readStdin: fakeStdin(
+        JSON.stringify({
+          hook_event_name: "PostToolUse",
+          tool_name: "Bash",
+          tool_input: { command: "bun test" },
+        }),
+      ),
+      env: {},
+    });
+    expect(code).toBe(0);
+    expect(loaded).toBe(false);
+    expect(execCount).toBe(0);
+    expect(err).toBe("");
+  });
+
+  test("dispatches Codex apply_patch PostToolUse as a file edit", async () => {
+    const outputModes: string[] = [];
+    const code = await runHookCommand("codex", "PostToolUse", {
+      cwd: "/repo",
+      write: () => {},
+      writeErr: () => {},
+      load: () => Promise.resolve(stubLoadedWithCodex()),
+      makeGit: () => stubGit(["src/a.ts"]),
+      exec: fakeExec(0, outputModes),
+      readStdin: fakeStdin(
+        JSON.stringify({
+          hook_event_name: "PostToolUse",
+          tool_name: "apply_patch",
+          tool_input: { command: "*** Begin Patch\\n*** End Patch" },
+        }),
+      ),
+      env: {},
+    });
+    expect(code).toBe(0);
+    expect(outputModes).toEqual(["buffered-on-failure"]);
   });
 });
 

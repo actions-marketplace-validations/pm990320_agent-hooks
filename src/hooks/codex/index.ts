@@ -5,13 +5,10 @@ import type { AgentHandler, AgentInstallContext } from "../types.ts";
 
 /**
  * OpenAI Codex CLI. Uses Claude-Code-style JSON on stdin
- * (hook_event_name + tool_name + tool_input + session_id). As of
- * early 2026 Codex's PostToolUse emits only for the Bash tool (no
- * file-editing hook yet — tracked upstream), and its tool_input
- * carries `command` rather than `file_path`. That means this handler
- * extracts no files from PostToolUse payloads, so project-scoped
- * pipeline steps (typically what `agent-edit` contains) are the
- * right fit — per-file pipelines will have nothing to narrow on.
+ * (hook_event_name + tool_name + tool_input + session_id). Codex's
+ * PostToolUse may fire for non-file-changing tools such as Bash; this
+ * handler fast-skips those noisy invocations and only dispatches
+ * PostToolUse for tool names that represent file edits.
  *
  * Hooks config lives at `.codex/hooks.json` (project) or
  * `~/.codex/hooks.json` (user); Codex merges both. The hook system
@@ -43,6 +40,13 @@ export const codex: AgentHandler = {
   stderrFeedbackOnExit2: true,
 
   parseInput: parseClaudeStyleInput,
+
+  shouldSkipHook(hookName, input) {
+    if (hookName !== "PostToolUse") return null;
+    return isCodexFileChangeTool(input.toolName)
+      ? null
+      : "non-file-changing Codex tool";
+  },
 
   async detect(cwd, homeDir, fs) {
     const project = path.join(cwd, ".codex");
@@ -89,6 +93,17 @@ export const codex: AgentHandler = {
     return hooksResult;
   },
 };
+
+const CODEX_FILE_CHANGE_TOOLS = new Set([
+  "apply_patch",
+  "Edit",
+  "Write",
+  "MultiEdit",
+]);
+
+function isCodexFileChangeTool(toolName: string | null): boolean {
+  return toolName !== null && CODEX_FILE_CHANGE_TOOLS.has(toolName);
+}
 
 /**
  * Ensure `[features] codex_hooks = true` is present in the target

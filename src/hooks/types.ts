@@ -78,6 +78,18 @@ export interface AgentHandler {
   /** Parse raw stdin text into the normalized shape. */
   parseInput(raw: string): NormalizedHookInput;
 
+  /**
+   * Optional fast-path filter for noisy native hook events. Return a
+   * short reason when this hook invocation should exit 0 before loading
+   * project config or resolving files. Keep this agent-specific so
+   * Claude/Cursor/etc. semantics do not change when Codex has a noisy
+   * tool surface.
+   */
+  shouldSkipHook?(
+    hookName: string,
+    input: NormalizedHookInput,
+  ): string | null;
+
   /** Locate an existing install of this agent. */
   detect(cwd: string, homeDir: string, fs: AgentFs): Promise<AgentDetection>;
 

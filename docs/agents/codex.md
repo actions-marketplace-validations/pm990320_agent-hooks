@@ -30,7 +30,7 @@ rules. Same JSON shape as Claude Code's `settings.json`:
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "apply_patch|Edit|Write|MultiEdit",
         "hooks": [
           { "type": "command", "command": "agent-hooks hook codex PostToolUse" }
         ]
@@ -55,7 +55,7 @@ agents:
   codex:
     hooks:
       PostToolUse:
-        - matcher: "Bash"
+        - matcher: "apply_patch|Edit|Write|MultiEdit"
           pipeline: agent-edit
 ```
 
@@ -68,15 +68,13 @@ agent-hooks agent install codex --scope user # if you want ~/.codex/
 
 ## Known Codex limitations (upstream, not agent-hooks)
 
-- **PostToolUse currently only emits for the `Bash` tool**. File-editing
-  operations (`Write`, `ApplyPatch`) don't fire hooks yet — [tracked
-  upstream](https://github.com/openai/codex/issues/17794). The handler
-  here will pick them up automatically once Codex emits them.
-- **The hook payload for Bash only carries `tool_input.command`**, not
-  file paths. That means agent-hooks' normalized `files` list is empty
-  for Codex PostToolUse events, so your codex-triggered pipeline should
-  lean on project-scoped steps (which is typical for `agent-edit`
-  pipelines anyway).
+- **PostToolUse can fire for non-file-changing tools such as `Bash`**.
+  agent-hooks fast-skips those Codex invocations and only dispatches
+  PostToolUse for file-edit tool names (`apply_patch`, `Edit`, `Write`,
+  `MultiEdit`).
+- **Codex file-edit payloads may not include explicit file paths**.
+  When the normalized `files` list is empty for a dispatched file-edit
+  event, agent-hooks falls back to the repo's changed files.
 - **Hooks are disabled on Windows** in the current Codex build.
 
 ## Skill install (optional, orthogonal to hooks)
