@@ -54,7 +54,7 @@ export type ExecFn = (input: ExecInput) => Promise<ExecResult>;
  *   (memory-bounded), but ordering is sane in parallel pipelines. Use
  *   for parallel pipelines.
  */
-export type ExecOutputMode = "inherit" | "buffered";
+export type ExecOutputMode = "inherit" | "buffered" | "buffered-on-failure";
 
 export interface ExecInput {
   readonly command: string;

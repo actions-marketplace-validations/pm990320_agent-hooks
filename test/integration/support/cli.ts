@@ -78,11 +78,15 @@ export async function runCli(
     };
   }
 
-  // Force buffered output mode for every spawned step so the in-process
-  // capture below sees their stdout/stderr — `inherit` mode would write
-  // straight to fd 1/2 and bypass process.stdout.write swapping.
+  // Force buffered output mode for non-hook spawned steps so the in-process
+  // capture below sees stdout/stderr — `inherit` mode would write straight
+  // to fd 1/2 and bypass process.stdout.write swapping. Hook dispatch chooses
+  // `buffered-on-failure` itself so success can stay silent.
   const previousForceMode = process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"];
-  process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"] = "buffered";
+  const shouldForceBuffered = !(argv[0] === "hook" && argv[1] !== "git");
+  if (shouldForceBuffered) {
+    process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"] = "buffered";
+  }
 
   try {
     process.chdir(options.cwd);
@@ -99,10 +103,12 @@ export async function runCli(
     const exitCode = await run(argv);
     return { exitCode, stdout, stderr };
   } finally {
-    if (previousForceMode === undefined) {
-      delete process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"];
-    } else {
-      process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"] = previousForceMode;
+    if (shouldForceBuffered) {
+      if (previousForceMode === undefined) {
+        delete process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"];
+      } else {
+        process.env["AGENT_HOOKS_FORCE_OUTPUT_MODE"] = previousForceMode;
+      }
     }
     // Belt-and-suspenders: if SAFE_CWD itself somehow got deleted
     // (shouldn't happen — it's the project root at `bun test` start),

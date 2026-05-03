@@ -44,7 +44,7 @@ import { registerChild } from "../runners/process-registry.ts";
 import { routeRepoFiles } from "../runners/workspace-paths.ts";
 import { resolveSkipDirectives } from "../runners/skip-directives.ts";
 import { spawnProcess, streamToText } from "../runners/spawn.ts";
-import type { ExecFn } from "../runners/step.ts";
+import type { ExecFn, ExecOutputMode } from "../runners/step.ts";
 import type { StepOutcome } from "../runners/pipeline.ts";
 import { writeFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
@@ -711,8 +711,10 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
     // set AGENT_HOOKS_FORCE_OUTPUT_MODE=buffered to opt every step into
     // buffered mode regardless of the pipeline runner's choice.
     const forced = process.env.AGENT_HOOKS_FORCE_OUTPUT_MODE;
-    const mode: "inherit" | "buffered" =
-      forced === "buffered" || forced === "inherit"
+    const mode: ExecOutputMode =
+      forced === "buffered" ||
+      forced === "inherit" ||
+      forced === "buffered-on-failure"
         ? forced
         : (output ?? "inherit");
 
@@ -828,8 +830,9 @@ export const defaultRunDeps: Omit<RunCommandDeps, "cwd" | "env"> & {
       const [stdoutText, stderrText] = timedOut
         ? await Promise.all([raceGrace(stdoutPromise), raceGrace(stderrPromise)])
         : await Promise.all([stdoutPromise, stderrPromise]);
-      if (stdoutText.length > 0) process.stdout.write(stdoutText);
-      if (stderrText.length > 0) process.stderr.write(stderrText);
+      const shouldFlush = mode === "buffered" || exitCode !== 0 || timedOut;
+      if (shouldFlush && stdoutText.length > 0) process.stdout.write(stdoutText);
+      if (shouldFlush && stderrText.length > 0) process.stderr.write(stderrText);
       return {
         exitCode,
         durationMs: Date.now() - start,

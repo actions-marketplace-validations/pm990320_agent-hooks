@@ -80,8 +80,11 @@ function stubLoadedWithCline(): LoadedConfig {
   };
 }
 
-function fakeExec(exit = 0): ExecFn {
-  return () => Promise.resolve({ exitCode: exit, durationMs: 1 });
+function fakeExec(exit = 0, seenOutputModes?: string[]): ExecFn {
+  return (input) => {
+    if (input.output) seenOutputModes?.push(input.output);
+    return Promise.resolve({ exitCode: exit, durationMs: 1 });
+  };
 }
 
 function fakeStdin(text = ""): HookCommandDeps["readStdin"] {
@@ -452,14 +455,21 @@ describe("readStdinStream", () => {
 });
 
 describe("runHookCommand — claude agent", () => {
-  test("runs the agent-edit pipeline when PostToolUse matcher fires", async () => {
+  test("runs the agent-edit pipeline quietly when PostToolUse matcher fires", async () => {
+    let out = "";
+    let err = "";
+    const outputModes: string[] = [];
     const code = await runHookCommand("claude", "PostToolUse", {
       cwd: "/repo",
-      write: () => {},
-      writeErr: () => {},
+      write: (text) => {
+        out += text;
+      },
+      writeErr: (text) => {
+        err += text;
+      },
       load: () => Promise.resolve(stubLoadedWithClaude()),
       makeGit: () => stubGit(),
-      exec: fakeExec(0),
+      exec: fakeExec(0, outputModes),
       readStdin: fakeStdin(
         JSON.stringify({
           tool_name: "Edit",
@@ -469,6 +479,9 @@ describe("runHookCommand — claude agent", () => {
       env: {},
     });
     expect(code).toBe(0);
+    expect(out).toBe("");
+    expect(err).toBe("");
+    expect(outputModes).toEqual(["buffered-on-failure"]);
   });
 
   test("returns 0 when no rule exists for the given hook name", async () => {

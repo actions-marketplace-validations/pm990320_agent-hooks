@@ -8,7 +8,12 @@ import {
   type PreflightContext,
   type PreflightResolver,
 } from "./preflight.ts";
-import { runStep, type ExecFn, type StepResult } from "./step.ts";
+import {
+  runStep,
+  type ExecFn,
+  type ExecOutputMode,
+  type StepResult,
+} from "./step.ts";
 
 export interface PipelineOptions {
   readonly pipelineName: string;
@@ -42,6 +47,8 @@ export interface PipelineOptions {
   readonly preflightContext?: PreflightContext;
   /** Resolver for command/file/env preflight checks. */
   readonly preflightResolver?: PreflightResolver;
+  /** Override child output handling for every step in this pipeline run. */
+  readonly outputMode?: ExecOutputMode;
   /** Called just before a step's command is executed. */
   readonly onStepStart?: (info: { name: string; tags: readonly string[] }) => void;
   /** Called after a step finishes (or is skipped by the step runner). */
@@ -185,7 +192,7 @@ async function runOneStep(
   entry: StepEntry,
   options: PipelineOptions,
   exec: ExecFn,
-  outputMode: "inherit" | "buffered",
+  outputMode: ExecOutputMode,
 ): Promise<StepOutcome> {
   // Change-gate check: before firing onStepStart, decide whether this
   // step should run at all. `forceGates` bypasses.
@@ -294,7 +301,12 @@ async function runSequentially(
   for (const entry of kept) {
     // Sequential: child stdio inherits parent → live streaming, no
     // memory pressure from buffering long output.
-    const outcome = await runOneStep(entry, options, exec, "inherit");
+    const outcome = await runOneStep(
+      entry,
+      options,
+      exec,
+      options.outputMode ?? "inherit",
+    );
     outcomes.push(outcome);
     if (
       !continueOnError &&
@@ -328,7 +340,12 @@ async function runInParallel(
       if (entry === undefined) return;
       // Parallel: buffer per step so two concurrent children don't
       // interleave on the parent's FDs. Flushed atomically on step end.
-      outcomes[index] = await runOneStep(entry, options, exec, "buffered");
+      outcomes[index] = await runOneStep(
+        entry,
+        options,
+        exec,
+        options.outputMode ?? "buffered",
+      );
     }
   }
 

@@ -83,9 +83,8 @@ describe("agent harness — end-to-end lifecycle", () => {
       }),
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("fake-lint:");
-    expect(result.stdout).toContain("src/a.txt");
-    expect(result.stdout).toContain("src/b.txt");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
   });
 
   test("fireAgentHook returns 0 (no-op) when no rule matches the tool", async () => {
@@ -152,7 +151,8 @@ agents:
     });
     expect(result.promptEcho).toBe("edit src/a.txt to add a comment");
     expect(result.hookResult.exitCode).toBe(0);
-    expect(result.hookResult.stdout).toContain("src/a.txt");
+    expect(result.hookResult.stdout).toBe("");
+    expect(result.hookResult.stderr).toBe("");
 
     const marker = await fs.readFile(result.markerPath, "utf8");
     expect(marker).toContain("prompt: edit src/a.txt");
@@ -199,6 +199,10 @@ agents:
       cwd: fixture.cwd,
     });
     expect(result.hookResult.exitCode).toBe(2);
+    expect(result.hookResult.stderr).toContain("failing on purpose");
+    expect(result.hookResult.stdout).not.toContain("pipeline: agent-edit");
+    expect(result.hookResult.stderr).toContain("---agent-hooks:next-step---");
+    expect(result.hookResult.stderr).toContain("status: failed");
   });
 
   test("agent install + fireAgentHook round-trip: claude config is written, then a hook fires", async () => {
@@ -230,7 +234,8 @@ agents:
       }),
     });
     expect(hookResult.exitCode).toBe(0);
-    expect(hookResult.stdout).toContain("fake-lint:");
+    expect(hookResult.stdout).toBe("");
+    expect(hookResult.stderr).toBe("");
   });
 
   test("gemini-cli round-trip with BeforeTool event", async () => {
@@ -255,7 +260,8 @@ agents:
       }),
     });
     expect(hookResult.exitCode).toBe(0);
-    expect(hookResult.stdout).toContain("src/b.txt");
+    expect(hookResult.stdout).toBe("");
+    expect(hookResult.stderr).toBe("");
   });
 
   test("droid round-trip writes settings into ~/.factory (user scope) and dispatches", async () => {
@@ -309,7 +315,8 @@ agents:
       }),
     });
     expect(hookResult.exitCode).toBe(0);
-    expect(hookResult.stdout).toContain("src/a.txt");
+    expect(hookResult.stdout).toBe("");
+    expect(hookResult.stderr).toBe("");
   });
 
   test("writeFakeAgentScript produces an executable script that can be invoked", async () => {
@@ -391,7 +398,8 @@ agents:
       }),
     });
     expect(claudeResult.exitCode).toBe(0);
-    expect(claudeResult.stdout).toContain("src/a.txt");
+    expect(claudeResult.stdout).toBe("");
+    expect(claudeResult.stderr).toBe("");
 
     const geminiResult = await fireAgentHook({
       agent: "gemini-cli",
@@ -404,6 +412,7 @@ agents:
       }),
     });
     expect(geminiResult.exitCode).toBe(0);
-    expect(geminiResult.stdout).toContain("src/b.txt");
+    expect(geminiResult.stdout).toBe("");
+    expect(geminiResult.stderr).toBe("");
   });
 });

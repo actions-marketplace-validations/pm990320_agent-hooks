@@ -5,7 +5,7 @@ import {
   type PipelineResult,
 } from "../runners/pipeline.ts";
 import type { Reporter, Writer } from "../reporters/index.ts";
-import { renderNextStepBlock, shouldEmitPrompt } from "../reporters/prompts.ts";
+import { shouldEmitPrompt } from "../reporters/prompts.ts";
 import type { ExecFn } from "../runners/step.ts";
 import type { NormalizedHookInput } from "./types.ts";
 
@@ -66,6 +66,23 @@ export function pickAgentRule(
   return null;
 }
 
+function renderAgentFailureBlock(
+  outcomeName: string,
+  exitCode: number,
+  summary: string,
+): string {
+  return [
+    "---agent-hooks:next-step---",
+    `step: ${outcomeName}`,
+    "status: failed",
+    `exit_code: ${String(exitCode)}`,
+    `summary: ${summary}`,
+    "next: Fix the failure shown above.",
+    "---end---",
+    "",
+  ].join("\n");
+}
+
 /**
  * Dispatch a parsed agent hook input to the appropriate pipeline.
  * Used by every agent — the only per-agent variation is in the
@@ -104,7 +121,6 @@ export async function dispatchAgentHook(
         ? { scope: "explicit" as const, files: options.input.files }
       : await resolveFiles(options.git, { scope: "changed" });
 
-  options.reporter.pipelineStart(rule.pipeline);
   const result = await runPipeline(
     {
       pipelineName: rule.pipeline,
@@ -113,26 +129,27 @@ export async function dispatchAgentHook(
       cwd: options.cwd,
       ...(options.repoRoot ? { repoRoot: options.repoRoot } : {}),
       env: options.env,
-      onStepStart: (info) => options.reporter.stepStart(info),
+      outputMode: "buffered-on-failure",
       onStepEnd: (outcome) => {
-        options.reporter.stepEnd(outcome);
         const step = options.config.steps[outcome.name];
-        if (step && options.writeErr && shouldEmitPrompt(outcome, "always")) {
+        if (
+          step &&
+          options.writeErr &&
+          shouldEmitPrompt(outcome, "failures-only")
+        ) {
           options.writeErr(
-            renderNextStepBlock({
-              outcome,
-              step,
-              cwd: options.cwd,
-              files: outcome.result?.files ?? [],
-            }),
+            renderAgentFailureBlock(
+              outcome.name,
+              outcome.result?.exitCode ?? 1,
+              outcome.result?.reason ??
+                `exited ${String(outcome.result?.exitCode ?? 1)}`,
+            ),
           );
         }
       },
     },
     options.exec,
   );
-  options.reporter.pipelineEnd(result);
-
   return {
     status: "ran",
     pipelineResult: result,

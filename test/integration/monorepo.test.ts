@@ -135,13 +135,8 @@ describe("monorepo lifecycle", () => {
       }),
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("ROOT_AGENT_EDIT cwd=");
-    expect(result.stdout).toContain("services/service-a/src/a.txt");
-    expect(result.stdout).toContain("services/service-b/src/b.txt");
-    expect(result.stdout).toContain("SERVICE_A_LINT cwd=");
-    expect(result.stdout).toContain("files=src/a.txt");
-    expect(result.stdout).not.toContain("SERVICE_B_LINT");
-    expect(result.stderr).not.toContain("no rule configured");
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
   });
 
   test("list groups root and workspace targets", async () => {
