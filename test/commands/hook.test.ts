@@ -509,10 +509,13 @@ describe("runHookCommand — claude agent", () => {
     // the agent. Remap any pipeline-failure exit code to 2 so our
     // ---agent-hooks:next-step--- stderr blocks actually reach the
     // coding agent and it can self-correct.
+    let err = "";
     const code = await runHookCommand("claude", "PostToolUse", {
       cwd: "/repo",
       write: () => {},
-      writeErr: () => {},
+      writeErr: (t) => {
+        err += t;
+      },
       load: () => Promise.resolve(stubLoadedWithClaude()),
       makeGit: () => stubGit(),
       exec: fakeExec(1),
@@ -525,6 +528,9 @@ describe("runHookCommand — claude agent", () => {
       env: {},
     });
     expect(code).toBe(2);
+    expect(err).toContain("---agent-hooks:next-step---");
+    expect(err).toContain("step: lint");
+    expect(err).toContain("status: failed");
   });
 
   test("returns 2 when the matched pipeline is missing", async () => {

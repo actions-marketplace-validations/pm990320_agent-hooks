@@ -4,7 +4,8 @@ import {
   runPipeline,
   type PipelineResult,
 } from "../runners/pipeline.ts";
-import type { Reporter } from "../reporters/index.ts";
+import type { Reporter, Writer } from "../reporters/index.ts";
+import { renderNextStepBlock, shouldEmitPrompt } from "../reporters/prompts.ts";
 import type { ExecFn } from "../runners/step.ts";
 import type { NormalizedHookInput } from "./types.ts";
 
@@ -20,6 +21,8 @@ export interface AgentDispatchOptions {
   readonly resolvedFiles?: readonly string[];
   readonly exec: ExecFn;
   readonly reporter: Reporter;
+  /** Optional stderr writer for agent feedback blocks. */
+  readonly writeErr?: Writer;
 }
 
 export type AgentDispatchStatus =
@@ -111,7 +114,20 @@ export async function dispatchAgentHook(
       ...(options.repoRoot ? { repoRoot: options.repoRoot } : {}),
       env: options.env,
       onStepStart: (info) => options.reporter.stepStart(info),
-      onStepEnd: (outcome) => options.reporter.stepEnd(outcome),
+      onStepEnd: (outcome) => {
+        options.reporter.stepEnd(outcome);
+        const step = options.config.steps[outcome.name];
+        if (step && options.writeErr && shouldEmitPrompt(outcome, "always")) {
+          options.writeErr(
+            renderNextStepBlock({
+              outcome,
+              step,
+              cwd: options.cwd,
+              files: outcome.result?.files ?? [],
+            }),
+          );
+        }
+      },
     },
     options.exec,
   );

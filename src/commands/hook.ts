@@ -386,6 +386,7 @@ async function runRegisteredAgent(
       git: deps.makeGit(deps.cwd),
       exec: deps.exec,
       reporter,
+      writeErr: deps.writeErr,
     });
 
     if (result.status === "no-rule" || result.status === "no-matcher-match") {
@@ -441,6 +442,7 @@ async function runRegisteredAgent(
       resolvedFiles: routed.rootFiles,
       exec: deps.exec,
       reporter: pickReporter({ env: deps.env, write: deps.write }),
+      writeErr: deps.writeErr,
     });
     if (result.status === "pipeline-missing") {
       deps.writeErr(`✗ ${agentName} hook "${hookName}" references undefined pipeline\n`);
@@ -466,6 +468,7 @@ async function runRegisteredAgent(
       resolvedFiles: routedWorkspace.workspaceFiles,
       exec: deps.exec,
       reporter: pickReporter({ env: deps.env, write: deps.write }),
+      writeErr: deps.writeErr,
     });
     if (result.status === "pipeline-missing") {
       deps.writeErr(`✗ ${agentName} hook "${hookName}" references undefined pipeline\n`);
