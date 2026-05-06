@@ -268,6 +268,37 @@ export class UnresolvableBaseRefError extends Error {
 
 const NOT_A_REPO_NEEDLE = "not a git repository";
 
+function uniqueNonEmpty(values: readonly (string | undefined)[]): string[] {
+  return [...new Set(values.filter((value): value is string =>
+    value !== undefined && value.trim().length > 0
+  ))];
+}
+
+function changedBaseCandidates(
+  baseRef: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (baseRef !== "origin/main") return [baseRef];
+  const githubBase = env.GITHUB_BASE_REF?.trim();
+  return uniqueNonEmpty([
+    baseRef,
+    githubBase ? `origin/${githubBase}` : undefined,
+    githubBase,
+    "main",
+    "master",
+  ]);
+}
+
+function originBranchName(ref: string): string | null {
+  return ref.startsWith("origin/") && ref.length > "origin/".length
+    ? ref.slice("origin/".length)
+    : null;
+}
+
+function shouldFetchMissingBase(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.GITHUB_ACTIONS === "true" || env.CI === "true";
+}
+
 /**
  * Global git args threaded onto every invocation:
  *
@@ -354,6 +385,36 @@ export function createGitRunner(
     return null;
   }
 
+  async function tryFetchOriginBranch(ref: string): Promise<boolean> {
+    const branch = originBranchName(ref);
+    if (!branch || !shouldFetchMissingBase()) return false;
+    const result = await spawnGit([
+      "fetch",
+      "--no-tags",
+      "--depth=1",
+      "origin",
+      `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+    ]);
+    if (result.exitCode === 0 && !result.signal) return true;
+    if (result.stderr.toLowerCase().includes(NOT_A_REPO_NEEDLE)) {
+      throw new NotAGitRepositoryError(cwd);
+    }
+    if (result.signal) failed(["fetch", "origin", branch], result);
+    return false;
+  }
+
+  async function tryMergeBase(ref: string): Promise<string | null> {
+    const result = await spawnGit(["merge-base", ref, "HEAD"]);
+    if (result.exitCode === 0 && !result.signal) {
+      return result.stdout.split("\n").find((line) => line.length > 0) ?? null;
+    }
+    if (result.stderr.toLowerCase().includes(NOT_A_REPO_NEEDLE)) {
+      throw new NotAGitRepositoryError(cwd);
+    }
+    if (result.signal) failed(["merge-base", ref, "HEAD"], result);
+    return null;
+  }
+
   return {
     staged() {
       return runZ([
@@ -366,16 +427,25 @@ export function createGitRunner(
     },
     async changed(baseRef = "origin/main") {
       // Resolve a usable base. Try the configured ref first, then fall
-      // back through the common local branch names so a fresh repo with
-      // no remote (no `origin/main`) Just Works against local `main` or
-      // `master`. An empty list means "diff against itself" — no churn.
-      const candidates =
-        baseRef === "origin/main" ? [baseRef, "main", "master"] : [baseRef];
+      // back through GitHub's PR base branch and common local branch names.
+      // In CI, shallow checkouts often contain only HEAD, so fetch a missing
+      // origin/<branch> candidate on demand before giving up.
+      const candidates = changedBaseCandidates(baseRef);
       const tried: string[] = [];
       let resolvedBase: string | null = null;
       for (const candidate of candidates) {
         tried.push(candidate);
-        const sha = await tryRevParse(candidate);
+        let sha = await tryRevParse(candidate);
+        if (
+          !sha &&
+          originBranchName(candidate) &&
+          shouldFetchMissingBase()
+        ) {
+          tried.push(`fetch ${candidate}`);
+          if (await tryFetchOriginBranch(candidate)) {
+            sha = await tryRevParse(candidate);
+          }
+        }
         if (sha) {
           resolvedBase = sha;
           break;
@@ -384,16 +454,17 @@ export function createGitRunner(
       if (!resolvedBase) {
         throw new UnresolvableBaseRefError(baseRef, tried);
       }
-      // Use merge-base to scope the diff to the divergence point so a
-      // long-lived branch doesn't surface its whole history as changed.
-      const mergeBases = await run(["merge-base", resolvedBase, "HEAD"]);
-      const base = mergeBases[0] ?? resolvedBase;
+      // Prefer merge-base for long-lived branches. If a shallow checkout does
+      // not have enough ancestry to compute one, compare the fetched base tip
+      // directly to HEAD; for GitHub PR merge refs this is the intended PR diff.
+      const mergeBase = await tryMergeBase(resolvedBase);
+      const range = mergeBase ? `${mergeBase}...HEAD` : `${resolvedBase}..HEAD`;
       return runZ([
         "diff",
         "--name-only",
         "--diff-filter=ACMRT",
         "-z",
-        `${base}...HEAD`,
+        range,
       ]);
     },
     all() {

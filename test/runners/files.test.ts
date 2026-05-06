@@ -178,11 +178,15 @@ describe("createGitRunner", () => {
    * filename-mode flag before keying the response table, so test
    * fixtures stay readable. Calls are still recorded verbatim.
    */
+  interface FakeResponse {
+    stdout: string;
+    stderr?: string;
+    exitCode?: number;
+    signal?: string;
+  }
+
   function fakeSpawner(
-    responses: Record<
-      string,
-      { stdout: string; stderr?: string; exitCode?: number; signal?: string }
-    >,
+    responses: Record<string, FakeResponse | FakeResponse[]>,
   ): { spawner: Spawner; calls: string[][] } {
     const calls: string[][] = [];
     const spawner: Spawner = (command, _cwd) => {
@@ -196,7 +200,10 @@ describe("createGitRunner", () => {
             arg !== "-z",
         );
       const key = meaningful.join(" ");
-      const match = responses[key] ?? { stdout: "", exitCode: 0 };
+      const response = responses[key] ?? { stdout: "", exitCode: 0 };
+      const match = Array.isArray(response)
+        ? response.shift() ?? { stdout: "", exitCode: 0 }
+        : response;
       return Promise.resolve({
         stdout: match.stdout,
         stderr: match.stderr ?? "",
@@ -245,19 +252,49 @@ describe("createGitRunner", () => {
     expect(calls).toHaveLength(3);
   });
 
-  test("changed() falls back to the resolved ref when merge-base returns nothing", async () => {
+  test("changed() falls back to a two-dot diff when merge-base returns nothing", async () => {
     const { spawner } = fakeSpawner({
       "rev-parse --verify --quiet origin/main^{commit}": {
         stdout: "deadbeef\n",
       },
       "merge-base deadbeef HEAD": { stdout: "" },
-      "diff --name-only --diff-filter=ACMRT deadbeef...HEAD": {
+      "diff --name-only --diff-filter=ACMRT deadbeef..HEAD": {
         stdout: "src/x.ts\0",
       },
     });
     const git = createGitRunner("/repo", spawner);
     const result = await git.changed();
     expect(result).toEqual(["src/x.ts"]);
+  });
+
+  test("changed() fetches a missing origin base in GitHub Actions shallow checkouts", async () => {
+    const previous = process.env.GITHUB_ACTIONS;
+    process.env.GITHUB_ACTIONS = "true";
+    try {
+      const { spawner, calls } = fakeSpawner({
+        "rev-parse --verify --quiet origin/main^{commit}": [
+          { stdout: "", exitCode: 1 },
+          { stdout: "deadbeef\n" },
+        ],
+        "fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main": {
+          stdout: "",
+        },
+        "merge-base deadbeef HEAD": { stdout: "", exitCode: 1 },
+        "diff --name-only --diff-filter=ACMRT deadbeef..HEAD": {
+          stdout: "src/gha.ts\0",
+        },
+      });
+      const git = createGitRunner("/repo", spawner);
+      const result = await git.changed();
+      expect(result).toEqual(["src/gha.ts"]);
+      expect(calls.some((call) => call.includes("fetch"))).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.GITHUB_ACTIONS;
+      } else {
+        process.env.GITHUB_ACTIONS = previous;
+      }
+    }
   });
 
   test("changed() falls back to local main when origin/main is missing", async () => {
