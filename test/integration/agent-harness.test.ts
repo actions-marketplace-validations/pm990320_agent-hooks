@@ -415,4 +415,346 @@ agents:
     expect(geminiResult.stdout).toBe("");
     expect(geminiResult.stderr).toBe("");
   });
+
+  // --- Hermes Agent (Nous Research) ------------------------------------
+  //
+  // Hermes lives at https://github.com/NousResearch/hermes-agent. Its
+  // shell-hook system loads from `~/.hermes/config.yaml` only — no
+  // project-local override on the hermes side. Stdin payloads share
+  // Claude Code's `hook_event_name`/`tool_name`/`tool_input` shape but
+  // event names are snake_case (`pre_tool_call`, `post_tool_call`, …)
+  // and matchers are regex full-matches against `tool_name`. Hermes
+  // does NOT use exit-code feedback: non-zero hook exits log a warning
+  // but never block the loop, so our handler intentionally leaves
+  // `stderrFeedbackOnExit2` unset and we assert that contract here.
+  test("hermes round-trip with post_tool_call event", async () => {
+    await writeAgentConfig(fixture.cwd, "hermes", "post_tool_call");
+    const result = await fireAgentHook({
+      agent: "hermes",
+      event: "post_tool_call",
+      cwd: fixture.cwd,
+      stdin: JSON.stringify({
+        hook_event_name: "post_tool_call",
+        tool_name: "Edit",
+        tool_input: { file_paths: ["src/a.txt"] },
+        session_id: "sess_test",
+        cwd: fixture.cwd,
+        extra: {},
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  test("hermes returns 0 (no-op) when the regex matcher does not match", async () => {
+    await writeAgentConfig(fixture.cwd, "hermes", "post_tool_call");
+    const result = await fireAgentHook({
+      agent: "hermes",
+      event: "post_tool_call",
+      cwd: fixture.cwd,
+      stdin: JSON.stringify({
+        hook_event_name: "post_tool_call",
+        // The fixture matcher is "Edit|Write"; "terminal" should not match.
+        tool_name: "terminal",
+        tool_input: { command: "echo hi" },
+        session_id: "sess_test",
+        cwd: fixture.cwd,
+        extra: {},
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("fake-lint:");
+  });
+
+  test("hermes does NOT remap pipeline failure to exit 2 (no stderrFeedbackOnExit2)", async () => {
+    // Same failing fixture as the claude test, but routed through
+    // hermes. Claude/codex/droid remap any non-zero exit to 2 so
+    // `stderr` reaches the model. Hermes feeds the model via stdout
+    // JSON, not exit codes, so the dispatcher must propagate the
+    // pipeline's exit code verbatim — anything other than 2.
+    const breakingConfig = `
+name: breaking
+steps:
+  failing:
+    run: bash scripts/failing.sh
+    invocation: project
+pipelines:
+  agent-edit:
+    steps: [failing]
+agents:
+  hermes:
+    hooks:
+      post_tool_call:
+        - matcher: "Edit"
+          pipeline: agent-edit
+`;
+    await fs.writeFile(
+      path.join(fixture.cwd, ".config", "agent-hooks.yml"),
+      breakingConfig,
+      "utf8",
+    );
+    const result = await fireAgentHook({
+      agent: "hermes",
+      event: "post_tool_call",
+      cwd: fixture.cwd,
+      stdin: JSON.stringify({
+        hook_event_name: "post_tool_call",
+        tool_name: "Edit",
+        tool_input: { file_paths: ["src/a.txt"] },
+        session_id: "sess_test",
+        cwd: fixture.cwd,
+        extra: {},
+      }),
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.exitCode).not.toBe(2);
+    expect(result.stderr).toContain("failing on purpose");
+  });
+
+  test("agent install hermes (project scope) writes a YAML config with our hooks block", async () => {
+    await writeAgentConfig(fixture.cwd, "hermes", "post_tool_call");
+
+    const installResult = await runCli(["agent", "install", "hermes"], {
+      cwd: fixture.cwd,
+    });
+    expect(installResult.exitCode).toBe(0);
+    expect(
+      await fixtureFileExists(fixture.cwd, ".hermes/config.yaml"),
+    ).toBe(true);
+
+    const settings = await readFixtureFile(
+      fixture.cwd,
+      ".hermes/config.yaml",
+    );
+    // YAML output: top-level `hooks:` map with `post_tool_call:` list
+    // whose entries point at our dispatch command.
+    expect(settings).toContain("hooks:");
+    expect(settings).toContain("post_tool_call:");
+    expect(settings).toContain(
+      "agent-hooks hook hermes post_tool_call",
+    );
+    expect(settings).toContain('matcher: Edit|Write');
+  });
+
+  test("hook payload paths from outside the repo are dropped (user-scope safety)", async () => {
+    // User-scope agent installs (hermes ~/.hermes/config.yaml,
+    // claude ~/.claude/settings.json, droid ~/.factory/settings.json,
+    // …) fire a single hooks file for every session regardless of the
+    // agent's working directory. Without a project-root clamp, a
+    // payload containing absolute paths from another project — or a
+    // tool_input pointing at /etc/hosts — would flow into whichever
+    // pipeline the current cwd's config defines. This test exercises
+    // the dispatcher's clamp via hermes (the most-recently-added
+    // user-scope agent) but the protection lives in
+    // src/commands/hook.ts and applies to every handler.
+    const recorderScript = `#!/usr/bin/env bash
+# Append every arg on its own line so the test can assert which
+# files actually reached the step. Always exits 0.
+for arg in "$@"; do
+  echo "$arg" >> .lint-args
+done
+exit 0
+`;
+    const recorderPath = path.join(
+      fixture.cwd,
+      "scripts",
+      "record-args.sh",
+    );
+    await fs.writeFile(recorderPath, recorderScript, "utf8");
+    await fs.chmod(recorderPath, 0o755);
+
+    const recordingConfig = `
+name: hermes-clamp
+steps:
+  record:
+    run: bash scripts/record-args.sh {files}
+    files: "**/*.txt"
+pipelines:
+  agent-edit:
+    steps: [record]
+agents:
+  hermes:
+    hooks:
+      post_tool_call:
+        - matcher: "Edit|Write"
+          pipeline: agent-edit
+`;
+    await fs.writeFile(
+      path.join(fixture.cwd, ".config", "agent-hooks.yml"),
+      recordingConfig,
+      "utf8",
+    );
+
+    // Mix: one in-repo absolute, one in-repo relative, one absolute
+    // path from a sibling project, one absolute system path. Only
+    // the first two should reach the step.
+    const inRepoAbsolute = path.join(fixture.cwd, "src", "a.txt");
+    const inRepoRelative = "src/b.txt";
+    const siblingProject = "/Users/somebody/other-project/src/x.txt";
+    const systemPath = "/etc/hosts";
+
+    const result = await fireAgentHook({
+      agent: "hermes",
+      event: "post_tool_call",
+      cwd: fixture.cwd,
+      stdin: JSON.stringify({
+        hook_event_name: "post_tool_call",
+        tool_name: "Edit",
+        tool_input: {
+          file_paths: [
+            inRepoAbsolute,
+            inRepoRelative,
+            siblingProject,
+            systemPath,
+          ],
+        },
+        session_id: "sess_test",
+        cwd: fixture.cwd,
+        extra: {},
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+
+    const recorded = await fs.readFile(
+      path.join(fixture.cwd, ".lint-args"),
+      "utf8",
+    );
+    const lines = recorded
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    // In-repo paths reached the step.
+    expect(lines).toContain(inRepoAbsolute);
+    expect(lines).toContain(inRepoRelative);
+    // Out-of-repo paths did NOT.
+    expect(lines).not.toContain(siblingProject);
+    expect(lines).not.toContain(systemPath);
+  });
+
+  test("hook payload with only out-of-repo paths skips the step instead of running it", async () => {
+    // After the clamp drops every path, the step's file list is
+    // empty. file-scoped steps with no fallback skip cleanly with
+    // exit 0 — the hook returns success and the agent loop continues
+    // without surfacing a confusing "no matching files" error.
+    const recorderScript = `#!/usr/bin/env bash
+echo "STEP RAN" >> .ran-marker
+exit 0
+`;
+    const recorderPath = path.join(
+      fixture.cwd,
+      "scripts",
+      "ran-marker.sh",
+    );
+    await fs.writeFile(recorderPath, recorderScript, "utf8");
+    await fs.chmod(recorderPath, 0o755);
+
+    const config = `
+name: hermes-clamp-empty
+steps:
+  record:
+    run: bash scripts/ran-marker.sh {files}
+    files: "**/*.txt"
+pipelines:
+  agent-edit:
+    steps: [record]
+agents:
+  hermes:
+    hooks:
+      post_tool_call:
+        - matcher: "Edit"
+          pipeline: agent-edit
+`;
+    await fs.writeFile(
+      path.join(fixture.cwd, ".config", "agent-hooks.yml"),
+      config,
+      "utf8",
+    );
+
+    const result = await fireAgentHook({
+      agent: "hermes",
+      event: "post_tool_call",
+      cwd: fixture.cwd,
+      stdin: JSON.stringify({
+        hook_event_name: "post_tool_call",
+        tool_name: "Edit",
+        tool_input: { file_paths: ["/etc/hosts", "/tmp/scratch.txt"] },
+        session_id: "sess_test",
+        cwd: fixture.cwd,
+        extra: {},
+      }),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(
+      await fixtureFileExists(fixture.cwd, ".ran-marker"),
+    ).toBe(false);
+  });
+
+  test("agent install hermes preserves foreign keys and is idempotent", async () => {
+    await writeAgentConfig(fixture.cwd, "hermes", "post_tool_call");
+
+    // Pre-seed the user's hand-edited config: an unrelated top-level
+    // key (providers) plus a foreign hook entry under post_tool_call
+    // that is NOT managed by agent-hooks. Both must survive install.
+    const seedYaml = `providers:
+  default: openai
+hooks_auto_accept: true
+hooks:
+  post_tool_call:
+    - matcher: "patch"
+      command: "~/.hermes/hooks/auto-format.sh"
+      timeout: 30
+`;
+    await fs.mkdir(path.join(fixture.cwd, ".hermes"), { recursive: true });
+    await fs.writeFile(
+      path.join(fixture.cwd, ".hermes", "config.yaml"),
+      seedYaml,
+      "utf8",
+    );
+
+    const firstInstall = await runCli(["agent", "install", "hermes"], {
+      cwd: fixture.cwd,
+    });
+    expect(firstInstall.exitCode).toBe(0);
+
+    const afterFirst = await readFixtureFile(
+      fixture.cwd,
+      ".hermes/config.yaml",
+    );
+    // Foreign top-level keys preserved.
+    expect(afterFirst).toContain("providers:");
+    expect(afterFirst).toContain("default: openai");
+    expect(afterFirst).toContain("hooks_auto_accept: true");
+    // Foreign hook entry preserved verbatim.
+    expect(afterFirst).toContain("auto-format.sh");
+    // Our managed entry inserted alongside.
+    expect(afterFirst).toContain(
+      "agent-hooks hook hermes post_tool_call",
+    );
+
+    // Re-running install must not duplicate our managed entry. We
+    // count occurrences of our dispatch command — exactly one after
+    // each install.
+    const ourCommand = "agent-hooks hook hermes post_tool_call";
+    const occurrencesAfterFirst = (
+      afterFirst.match(new RegExp(ourCommand, "g")) ?? []
+    ).length;
+    expect(occurrencesAfterFirst).toBe(1);
+
+    const secondInstall = await runCli(["agent", "install", "hermes"], {
+      cwd: fixture.cwd,
+    });
+    expect(secondInstall.exitCode).toBe(0);
+    const afterSecond = await readFixtureFile(
+      fixture.cwd,
+      ".hermes/config.yaml",
+    );
+    const occurrencesAfterSecond = (
+      afterSecond.match(new RegExp(ourCommand, "g")) ?? []
+    ).length;
+    expect(occurrencesAfterSecond).toBe(1);
+    // Foreign entry still there after re-install.
+    expect(afterSecond).toContain("auto-format.sh");
+  });
 });

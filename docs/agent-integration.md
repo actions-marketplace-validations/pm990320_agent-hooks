@@ -89,6 +89,7 @@ wires their native hook surface directly through agent-hooks:
 - Pi (pi-mono)
 - Neovate
 - OpenClaw
+- Hermes Agent (Nous Research)
 
 The canonical invocation is always:
 

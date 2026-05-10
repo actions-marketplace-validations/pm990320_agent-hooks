@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  clampPathsToRepo,
   createGitRunner,
   defaultSpawner,
   filterByGlob,
@@ -169,6 +170,52 @@ describe("filterByGlob", () => {
     expect(filterByGlob(files, "src/bar.*", { nocase: false })).toEqual([
       "src/bar.ts",
     ]);
+  });
+});
+
+describe("clampPathsToRepo", () => {
+  // Pick a deep, real-looking absolute root so tests don't depend on
+  // any particular host fs layout.
+  const root = "/private/var/repo";
+
+  test("preserves repo-relative paths verbatim", () => {
+    expect(
+      clampPathsToRepo(["src/a.ts", "test/b.ts"], root),
+    ).toEqual(["src/a.ts", "test/b.ts"]);
+  });
+
+  test("preserves absolute paths inside the repo", () => {
+    expect(
+      clampPathsToRepo(
+        [`${root}/src/a.ts`, `${root}/nested/dir/b.ts`],
+        root,
+      ),
+    ).toEqual([`${root}/src/a.ts`, `${root}/nested/dir/b.ts`]);
+  });
+
+  test("drops absolute paths outside the repo", () => {
+    expect(
+      clampPathsToRepo(
+        ["src/a.ts", "/etc/hosts", "/private/var/other/foo.ts"],
+        root,
+      ),
+    ).toEqual(["src/a.ts"]);
+  });
+
+  test("drops `..`-escapes that resolve outside the repo", () => {
+    expect(
+      clampPathsToRepo(["../sibling/foo.ts", "src/ok.ts"], root),
+    ).toEqual(["src/ok.ts"]);
+  });
+
+  test("returns an empty list when every path is out of repo", () => {
+    expect(
+      clampPathsToRepo(["/etc/hosts", "/tmp/scratch.ts"], root),
+    ).toEqual([]);
+  });
+
+  test("returns an empty list for empty input", () => {
+    expect(clampPathsToRepo([], root)).toEqual([]);
   });
 });
 

@@ -1,3 +1,4 @@
+import nodeFs from "node:fs";
 import nodePath from "node:path";
 import picomatch from "picomatch";
 import { registerChild } from "./process-registry.ts";
@@ -136,6 +137,63 @@ export async function resolveFiles(
       };
     case "all":
       return { scope: "all", files: dedupe(await git.all()) };
+  }
+}
+
+/**
+ * Filter a list of file paths down to those that resolve inside
+ * `repoRoot`. Out-of-repo paths are dropped silently — the
+ * filtering counterpart to `resolveFiles`'s throwing
+ * `PathOutsideRepoError` clamp. Used by the agent-hook dispatcher
+ * to neutralize stray absolute paths an agent might emit (e.g.
+ * a user-scope hermes/claude install firing with paths from a
+ * different project, or a hostile/sloppy `tool_input.file_path`).
+ *
+ * Path semantics match `resolveFiles`: relative paths anchor at
+ * `repoRoot`, absolute paths are checked verbatim, and the result
+ * preserves each surviving path's original relative-or-absolute
+ * form so step-level globs see the same shape they always did.
+ *
+ * Symlinks are tolerated on both sides: macOS commonly hands us
+ * `/var/folders/...` for `os.tmpdir()` while `process.cwd()` after
+ * a chdir reports `/private/var/folders/...`. Pure lexical
+ * comparison would drop in-repo absolute payload paths whenever the
+ * two forms diverge, so we also test against `realpath`-canonical
+ * forms when both root and file resolve cleanly.
+ */
+export function clampPathsToRepo(
+  files: readonly string[],
+  repoRoot: string,
+): readonly string[] {
+  const rootResolved = nodePath.resolve(repoRoot);
+  const rootReal = safeRealpath(rootResolved);
+  return files.filter((filePath) => {
+    const absolute = nodePath.isAbsolute(filePath)
+      ? nodePath.resolve(filePath)
+      : nodePath.resolve(rootResolved, filePath);
+    const absoluteReal = safeRealpath(absolute);
+    return (
+      isInsideRoot(rootResolved, absolute) ||
+      isInsideRoot(rootReal, absolute) ||
+      isInsideRoot(rootResolved, absoluteReal) ||
+      isInsideRoot(rootReal, absoluteReal)
+    );
+  });
+}
+
+function isInsideRoot(root: string, absolute: string): boolean {
+  const rel = nodePath.relative(root, absolute);
+  return !(rel.startsWith("..") || nodePath.isAbsolute(rel));
+}
+
+function safeRealpath(filePath: string): string {
+  try {
+    return nodeFs.realpathSync.native(filePath);
+  } catch {
+    // realpath fails on missing paths — common for files an agent
+    // is about to create. Fall back to the lexical form so callers
+    // can still match on the unresolved comparison.
+    return filePath;
   }
 }
 
