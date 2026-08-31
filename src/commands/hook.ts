@@ -10,7 +10,12 @@ import { dispatchAgentHook } from "../hooks/dispatch.ts";
 import { dispatchGitHook, scopeForGitHook } from "../hooks/git/dispatch.ts";
 import { getAgentHandler } from "../hooks/registry.ts";
 import { pickReporter } from "../reporters/index.ts";
-import { resolveFiles, type GitRunner, type Scope } from "../runners/files.ts";
+import {
+  clampPathsToRepo,
+  resolveFiles,
+  type GitRunner,
+  type Scope,
+} from "../runners/files.ts";
 import { routeRepoFiles } from "../runners/workspace-paths.ts";
 import { defaultRunDeps, type RunCommandDeps } from "./run.ts";
 
@@ -381,12 +386,30 @@ async function runRegisteredAgent(
 
   const agentKey = configKeyFor(agentName);
 
+  // Drop hook-payload paths that resolve outside the loaded project's
+  // repo root. User-scope agent installs (claude/hermes/droid/codex
+  // at ~/.<agent>/…) fire for every session regardless of cwd, so
+  // payloads can carry absolute paths from another project — or a
+  // tool_input pointing at a system path like /etc/hosts. Without
+  // this clamp those reach pipelines whose `files:` glob happens to
+  // match (`**/*.ts` matches absolute paths too). The CLI's `--files`
+  // input enjoys the same boundary check via resolveFiles; this
+  // mirrors it for the hook code path. We filter silently rather than
+  // throwing so a hermes session editing a system file doesn't blow
+  // up the hook — the pipeline just runs against zero in-repo files.
+  const repoRoot =
+    project.mode === "single" ? deps.cwd : project.repoRoot;
+  const clampedInput =
+    input.files.length > 0
+      ? { ...input, files: clampPathsToRepo(input.files, repoRoot) }
+      : input;
+
   if (project.mode === "single") {
     const reporter = pickReporter({ env: deps.env, write: deps.write });
     const result = await dispatchAgentHook({
       agentKey,
       hookName,
-      input,
+      input: clampedInput,
       config: project.loaded.config,
       cwd: deps.cwd,
       repoRoot: deps.cwd,
@@ -429,8 +452,8 @@ async function runRegisteredAgent(
 
   const git = deps.makeGit(project.repoRoot);
   const repoFiles =
-    input.files.length > 0
-      ? input.files
+    clampedInput.files.length > 0
+      ? clampedInput.files
       : (await resolveFiles(git, { scope: "changed" })).files;
   const routed = routeRepoFiles(repoFiles, project.workspaces);
 
@@ -441,7 +464,7 @@ async function runRegisteredAgent(
     const result = await dispatchAgentHook({
       agentKey,
       hookName,
-      input,
+      input: clampedInput,
       config: project.root.config,
       cwd: project.repoRoot,
       repoRoot: project.repoRoot,
@@ -467,7 +490,7 @@ async function runRegisteredAgent(
     const result = await dispatchAgentHook({
       agentKey,
       hookName,
-      input,
+      input: clampedInput,
       config: routedWorkspace.workspace.config,
       cwd: routedWorkspace.workspace.workspaceRoot,
       repoRoot: project.repoRoot,

@@ -8,6 +8,7 @@ import { cortexCode } from "./cortex-code/index.ts";
 import { droid } from "./droid/index.ts";
 import { geminiCli } from "./gemini-cli/index.ts";
 import { githubCopilot } from "./github-copilot/index.ts";
+import { hermes } from "./hermes/index.ts";
 import { iflowCli } from "./iflow-cli/index.ts";
 import { kiloCode } from "./kilo-code/index.ts";
 import { kimiCodeCli } from "./kimi-code-cli/index.ts";
@@ -49,6 +50,7 @@ export const AGENT_HANDLERS: readonly AgentHandler[] = [
   pi,
   neovate,
   openclaw,
+  hermes,
 ];
 
 export function getAgentHandler(name: string): AgentHandler | null {
